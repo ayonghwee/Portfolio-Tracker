@@ -2,7 +2,21 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '../lib/supabase'
-import { fmtMoney, fmtPct, calcROI, calcXIRR } from '../lib/utils'
+import { fmtMoney, calcROI, calcXIRR } from '../lib/utils'
+
+const COLUMNS = [
+  { key: 'policy_number', label: 'POLICY #' },
+  { key: 'nickname',      label: 'NICKNAME' },
+  { key: 'product',       label: 'PRODUCT' },
+  { key: 'commenced',     label: 'COMMENCED' },
+  { key: 'premium',       label: 'PREMIUM' },
+  { key: 'invested',      label: 'INVESTED' },
+  { key: 'aum',           label: 'AUM' },
+  { key: 'cash',          label: 'CASH' },
+  { key: 'dividends',     label: 'DIVIDENDS' },
+  { key: 'roi',           label: 'ROI' },
+  { key: 'xirr',         label: 'XIRR' },
+]
 
 export default function LedgerPage() {
   const [policies, setPolicies] = useState([])
@@ -11,6 +25,9 @@ export default function LedgerPage() {
   const [search, setSearch] = useState('')
   const [now, setNow] = useState('')
   const [refreshing, setRefreshing] = useState(false)
+  const [showNames, setShowNames] = useState(false)
+  const [sortCol, setSortCol] = useState('xirr')
+  const [sortDir, setSortDir] = useState('desc')
 
   useEffect(() => {
     setNow(new Date().toLocaleString('en-SG', {
@@ -23,20 +40,13 @@ export default function LedgerPage() {
 
   async function loadData() {
     setLoading(true)
-    // Load policies with their fund holdings
     const { data: policiesData } = await supabase
       .from('policies')
       .select('*, fund_holdings(*)')
       .order('commenced', { ascending: false })
-
-    // Load cached prices
-    const { data: pricesData } = await supabase
-      .from('price_cache')
-      .select('*')
-
+    const { data: pricesData } = await supabase.from('price_cache').select('*')
     const priceMap = {}
     pricesData?.forEach(p => { priceMap[p.fund_name] = p.bid_price })
-
     setPolicies(policiesData || [])
     setPrices(priceMap)
     setLoading(false)
@@ -52,9 +62,7 @@ export default function LedgerPage() {
         data.prices.forEach(p => { pm[p.fund_name] = p.bid_price })
         setPrices(pm)
       }
-    } catch (e) {
-      console.error(e)
-    }
+    } catch (e) { console.error(e) }
     setRefreshing(false)
   }
 
@@ -66,15 +74,44 @@ export default function LedgerPage() {
     }, 0)
   }
 
-  const filtered = policies.filter(p =>
-    !search ||
-    p.policy_number?.toLowerCase().includes(search.toLowerCase()) ||
-    p.nickname?.toLowerCase().includes(search.toLowerCase()) ||
-    p.product?.toLowerCase().includes(search.toLowerCase())
-  )
+  function handleSort(col) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('desc') }
+  }
 
-  const totalAUM = filtered.reduce((s, p) => s + getAUM(p), 0)
-  const totalInvested = filtered.reduce((s, p) => s + (p.invested || 0), 0)
+  function getSortArrow(col) {
+    if (sortCol !== col) return <span className="text-gray-200 ml-1">↕</span>
+    return <span className="ml-1" style={{ color: '#2d5016' }}>{sortDir === 'asc' ? '↑' : '↓'}</span>
+  }
+
+  const enriched = policies
+    .filter(p =>
+      !search ||
+      p.policy_number?.toLowerCase().includes(search.toLowerCase()) ||
+      p.nickname?.toLowerCase().includes(search.toLowerCase()) ||
+      p.product?.toLowerCase().includes(search.toLowerCase())
+    )
+    .map(p => {
+      const aum = getAUM(p)
+      return {
+        ...p,
+        aum,
+        roi: calcROI(aum, p.invested),
+        xirr: calcXIRR(aum, p.invested, p.commenced),
+      }
+    })
+    .sort((a, b) => {
+      let av = a[sortCol], bv = b[sortCol]
+      if (av == null) av = sortDir === 'asc' ? Infinity : -Infinity
+      if (bv == null) bv = sortDir === 'asc' ? Infinity : -Infinity
+      if (typeof av === 'string') return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av)
+      return sortDir === 'asc' ? av - bv : bv - av
+    })
+
+  const totalAUM = enriched.reduce((s, p) => s + p.aum, 0)
+  const totalInvested = enriched.reduce((s, p) => s + (p.invested || 0), 0)
+  const totalCash = enriched.reduce((s, p) => s + (p.cash || 0), 0)
+  const totalDividends = enriched.reduce((s, p) => s + (p.dividends || 0), 0)
   const aggROI = calcROI(totalAUM, totalInvested)
 
   return (
@@ -91,7 +128,7 @@ export default function LedgerPage() {
         <span className="font-display text-xl font-semibold italic">Ledger <span className="text-xs font-sans font-normal not-italic text-gray-400">the portfolio ledger</span></span>
         <div className="flex gap-6 text-sm text-gray-500">
           <span className="text-gray-900 font-medium cursor-pointer">Portfolios</span>
-          <Link href="/policy/new" className="hover:text-gray-900 cursor-pointer">+ Add Policy</Link>
+          <Link href="/policy/new" className="hover:text-gray-900">+ Add Policy</Link>
         </div>
       </div>
 
@@ -139,18 +176,20 @@ export default function LedgerPage() {
           </div>
         </div>
 
-        {/* Search + Add */}
+        {/* Controls */}
         <div className="flex items-center gap-3 mb-6">
-          <div className="flex-1 relative">
-            <input
-              type="text"
-              placeholder="Search policies, nicknames, funds…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
+          <div className="flex-1">
+            <input type="text" placeholder="Search policies, nicknames, funds…"
+              value={search} onChange={e => setSearch(e.target.value)}
               className="w-full pl-4 pr-4 py-2 text-sm border border-gray-200 rounded"
-              style={{ background: 'white' }}
-            />
+              style={{ background: 'white' }} />
           </div>
+          <button
+            onClick={() => setShowNames(n => !n)}
+            className="btn-secondary text-xs tracking-widest flex items-center gap-1.5">
+            <span style={{ fontSize: 11 }}>{showNames ? '👁' : '🙈'}</span>
+            {showNames ? 'HIDE NAMES' : 'SHOW NAMES'}
+          </button>
           <Link href="/policy/new">
             <button className="btn-primary text-xs tracking-widest">+ ADD POLICY</button>
           </Link>
@@ -161,49 +200,58 @@ export default function LedgerPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-300">
-                {['POLICY #', 'NICKNAME', 'PRODUCT', 'COMMENCED', 'PREMIUM', 'INVESTED', 'AUM', 'ROI', 'XIRR'].map(h => (
-                  <th key={h} className="text-left py-2 pr-4 text-xs tracking-widest text-gray-400 font-normal">{h}</th>
+                {COLUMNS.map(col => (
+                  <th key={col.key}
+                    onClick={() => handleSort(col.key)}
+                    className="text-left py-2 pr-4 text-xs tracking-widest text-gray-400 font-normal cursor-pointer hover:text-gray-700 select-none whitespace-nowrap">
+                    {col.label}{getSortArrow(col.key)}
+                  </th>
                 ))}
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={10} className="py-12 text-center text-gray-400 text-sm">Loading portfolios…</td></tr>
-              ) : filtered.length === 0 ? (
-                <tr><td colSpan={10} className="py-12 text-center text-gray-400 text-sm">
+                <tr><td colSpan={12} className="py-12 text-center text-gray-400 text-sm">Loading portfolios…</td></tr>
+              ) : enriched.length === 0 ? (
+                <tr><td colSpan={12} className="py-12 text-center text-gray-400 text-sm">
                   No policies yet.{' '}
                   <Link href="/policy/new" className="underline text-gray-600">Add your first policy →</Link>
                 </td></tr>
-              ) : filtered.map(p => {
-                const aum = getAUM(p)
-                const roi = calcROI(aum, p.invested)
-                const xirr = calcXIRR(aum, p.invested, p.commenced)
-                return (
-                  <tr key={p.id} className="table-row">
-                    <td className="py-3 pr-4">
-                      <Link href={`/policy/${p.id}`} className="text-terracotta hover:underline font-mono text-xs">{p.policy_number}</Link>
-                    </td>
-                    <td className="py-3 pr-4 text-gray-500 text-xs">{p.nickname || '—'}</td>
-                    <td className="py-3 pr-4 font-medium text-xs">{p.product}</td>
-                    <td className="py-3 pr-4 text-gray-500 text-xs">
-                      {p.commenced ? new Date(p.commenced).toLocaleDateString('en-SG', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
-                    </td>
-                    <td className="py-3 pr-4 text-right font-mono text-xs">{fmtMoney(p.premium)}</td>
-                    <td className="py-3 pr-4 text-right font-mono text-xs">{fmtMoney(p.invested)}</td>
-                    <td className="py-3 pr-4 text-right font-mono text-xs">{fmtMoney(aum)}</td>
-                    <td className={`py-3 pr-4 text-right text-xs ${roi >= 0 ? 'positive' : roi < 0 ? 'negative' : ''}`}>
-                      {roi != null ? `${roi >= 0 ? '↑' : '↓'} ${Math.abs(roi).toFixed(2)}%` : '—'}
-                    </td>
-                    <td className={`py-3 pr-4 text-right text-xs ${xirr >= 0 ? 'positive' : xirr < 0 ? 'negative' : ''}`}>
-                      {xirr != null ? `${xirr.toFixed(2)}%` : '—'}
-                    </td>
-                    <td className="py-3">
-                      <Link href={`/policy/${p.id}`} className="text-gray-300 hover:text-gray-600 text-lg">···</Link>
-                    </td>
-                  </tr>
-                )
-              })}
+              ) : enriched.map(p => (
+                <tr key={p.id} className="table-row">
+                  <td className="py-3 pr-4">
+                    <Link href={`/policy/${p.id}`} className="text-terracotta hover:underline font-mono text-xs">{p.policy_number}</Link>
+                  </td>
+                  <td className="py-3 pr-4 text-xs" style={{ maxWidth: 120 }}>
+                    <span style={{
+                      filter: showNames ? 'none' : 'blur(4px)',
+                      transition: 'filter 0.2s',
+                      userSelect: showNames ? 'auto' : 'none',
+                      display: 'inline-block',
+                      color: '#888'
+                    }}>{p.nickname || '—'}</span>
+                  </td>
+                  <td className="py-3 pr-4 font-medium text-xs">{p.product}</td>
+                  <td className="py-3 pr-4 text-gray-500 text-xs whitespace-nowrap">
+                    {p.commenced ? new Date(p.commenced).toLocaleDateString('en-SG', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                  </td>
+                  <td className="py-3 pr-4 text-right font-mono text-xs">{fmtMoney(p.premium)}</td>
+                  <td className="py-3 pr-4 text-right font-mono text-xs">{fmtMoney(p.invested)}</td>
+                  <td className="py-3 pr-4 text-right font-mono text-xs">{fmtMoney(p.aum)}</td>
+                  <td className="py-3 pr-4 text-right font-mono text-xs neutral">{p.cash ? fmtMoney(p.cash) : '—'}</td>
+                  <td className="py-3 pr-4 text-right font-mono text-xs neutral">{p.dividends ? fmtMoney(p.dividends) : '—'}</td>
+                  <td className={`py-3 pr-4 text-right text-xs ${p.roi >= 0 ? 'positive' : p.roi < 0 ? 'negative' : ''}`}>
+                    {p.roi != null ? `${p.roi >= 0 ? '↑' : '↓'} ${Math.abs(p.roi).toFixed(2)}%` : '—'}
+                  </td>
+                  <td className={`py-3 pr-4 text-right text-xs ${p.xirr >= 0 ? 'positive' : p.xirr < 0 ? 'negative' : ''}`}>
+                    {p.xirr != null ? `${p.xirr.toFixed(2)}%` : '—'}
+                  </td>
+                  <td className="py-3">
+                    <Link href={`/policy/${p.id}`} className="text-gray-300 hover:text-gray-600 text-lg">···</Link>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

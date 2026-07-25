@@ -59,6 +59,8 @@ export default function NewPolicyPage() {
     premium: '',
     frequency: 'Monthly',
     invested: '',
+    cash: '',
+    dividends: '',
   })
   const [holdings, setHoldings] = useState([
     { fund_name: '', units: '', avg_price: '' }
@@ -90,6 +92,8 @@ export default function NewPolicyPage() {
           premium: parseFloat(policy.premium) || 0,
           frequency: policy.frequency,
           invested: parseFloat(policy.invested) || 0,
+          cash: parseFloat(policy.cash) || 0,
+          dividends: parseFloat(policy.dividends) || 0,
         })
         .select()
         .single()
@@ -189,6 +193,18 @@ export default function NewPolicyPage() {
                 <input type="number" step="0.01" placeholder="0.00"
                   value={policy.invested}
                   onChange={e => updatePolicy('invested', e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1 uppercase tracking-wider">Cash Value</label>
+                <input type="number" step="0.01" placeholder="0.00"
+                  value={policy.cash}
+                  onChange={e => updatePolicy('cash', e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1 uppercase tracking-wider">Dividends Received</label>
+                <input type="number" step="0.01" placeholder="0.00"
+                  value={policy.dividends}
+                  onChange={e => updatePolicy('dividends', e.target.value)} />
               </div>
             </div>
           </div>
