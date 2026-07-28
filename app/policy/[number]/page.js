@@ -4,6 +4,8 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '../../../lib/supabase'
 import { fmtMoney, calcROI, calcXIRR, calcDuration, fmtDate } from '../../../lib/utils'
+import SmartTxForm from '../../components/SmartTxForm'
+import { FUND_CODE_MAP } from '../../components/FundTypeahead'
 
 const FUND_COLORS = ['#2d5016','#b8963e','#c0724a','#4a7c59','#8b6914','#5a3e2b','#3d6b8c','#7a4f3e','#4e6b2d','#9b7b3d']
 const TX_TYPES = ['Net Investment Premium','Reinvest','Switch In','Switch Out','Welcome Bonus','Dividend']
@@ -271,6 +273,12 @@ export default function PolicyPage() {
   const [savingTx, setSavingTx]       = useState(false)
   const [timelineYear, setTimelineYear] = useState(new Date().getFullYear())
 
+  function openAddTx(type) {
+    setNewTx({ date: '', type: type || 'Reinvest', fund_name: '', price: '', units: '', value: '' })
+    setShowAddTx(true)
+    setTimeout(() => document.getElementById('add-tx-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+  }
+
   useEffect(() => { checkAuthAndLoad() }, [number])
 
   async function checkAuthAndLoad() {
@@ -374,6 +382,33 @@ export default function PolicyPage() {
     await loadData(); setEditingPolicy(false); setSaving(false)
   }
 
+  // Auto-derive fund_holdings units from transaction ledger.
+  // Called after every transaction add so new funds appear without manual holdings edit.
+  async function syncHoldingsFromTransactions(allTx) {
+    const timeline = computeBalanceUnits(allTx)
+    const updates = Object.entries(timeline)
+      .map(([fund, txs]) => ({ fund_name: fund, units: txs[txs.length - 1]?.bal_units || 0 }))
+      .filter(h => h.units > 0.000001)
+
+    // Fetch existing holdings to preserve avg_price values
+    const { data: existing } = await supabase.from('fund_holdings').select('*').eq('policy_id', policyId)
+    const existingMap = {}
+    existing?.forEach(h => { existingMap[h.fund_name] = h })
+
+    await supabase.from('fund_holdings').delete().eq('policy_id', policyId)
+    if (updates.length) {
+      await supabase.from('fund_holdings').insert(
+        updates.map(h => ({
+          policy_id: policyId,
+          fund_name: h.fund_name,
+          units: h.units,
+          avg_price: existingMap[h.fund_name]?.avg_price || null,
+          last_known_price: existingMap[h.fund_name]?.last_known_price || null,
+        }))
+      )
+    }
+  }
+
   async function addTransaction() {
     if (!newTx.date || !newTx.type) return
     setSavingTx(true)
@@ -385,7 +420,10 @@ export default function PolicyPage() {
       date: newTx.date, type: newTx.type,
       price: price || null, units: units || null, value: value || null,
     })
-    setNewTx({ date: '', type: 'Reinvest', fund_name: '', price: '', units: '', value: '' })
+    // Re-fetch all transactions then sync holdings
+    const { data: allTx } = await supabase.from('transactions').select('*').eq('policy_id', policyId).order('date', { ascending: true })
+    if (allTx) await syncHoldingsFromTransactions(allTx)
+    setNewTx(t => ({ ...t, date: '', units: '', price: '', value: '' }))
     setShowAddTx(false)
     await loadData()
     setSavingTx(false)
@@ -393,7 +431,9 @@ export default function PolicyPage() {
 
   async function deleteTransaction(txId) {
     await supabase.from('transactions').delete().eq('id', txId)
-    setTransactions(t => t.filter(tx => tx.id !== txId))
+    const { data: allTx } = await supabase.from('transactions').select('*').eq('policy_id', policyId).order('date', { ascending: true })
+    if (allTx) await syncHoldingsFromTransactions(allTx)
+    await loadData()
   }
 
   async function updateManualPrice(fundName, price) {
@@ -480,7 +520,7 @@ export default function PolicyPage() {
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-8 py-10">
+      <div className="max-w-7xl mx-auto px-8 py-10">
 
         {/* ── I. Policy Detail ── */}
         <div className="mb-8">
@@ -782,12 +822,17 @@ export default function PolicyPage() {
         <div className="mb-10">
           <div className="flex items-center justify-between mb-1">
             <div className="roman">VI. Contribution timeline</div>
-            <div className="flex items-center gap-3 text-xs text-gray-400">
-              <button onClick={() => setTimelineYear(y => y - 1)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af' }}>‹</button>
-              <span className="font-medium text-gray-700 text-sm">{timelineYear}</span>
-              <button onClick={() => setTimelineYear(y => y + 1)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af' }}>›</button>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 text-xs text-gray-400">
+                <button onClick={() => setTimelineYear(y => y - 1)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af' }}>‹</button>
+                <span className="font-medium text-gray-700 text-sm">{timelineYear}</span>
+                <button onClick={() => setTimelineYear(y => y + 1)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af' }}>›</button>
+              </div>
+              <button onClick={() => { setShowAddTx(true); setTimeout(() => document.getElementById('add-tx-form')?.scrollIntoView({behavior:'smooth'}), 50) }}
+                className="text-xs text-gray-400 hover:text-gray-700 underline"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>+ Add switch</button>
             </div>
           </div>
           <div className="text-xs text-gray-400 mb-4">Monthly premium allocations across funds</div>
@@ -796,7 +841,12 @@ export default function PolicyPage() {
 
         {/* ── VII. Dividends ── */}
         <div className="mb-10">
-          <div className="roman mb-1">VII. Dividends</div>
+          <div className="flex items-center justify-between mb-1">
+            <div className="roman">VII. Dividends</div>
+            <button onClick={() => { setShowAddTx(true); setTimeout(() => document.getElementById('add-tx-form')?.scrollIntoView({behavior:'smooth'}), 50) }}
+              className="text-xs text-gray-400 hover:text-gray-700 underline"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>+ Add dividend</button>
+          </div>
           <div className="text-xs text-gray-400 mb-4">Distributions received from underlying funds</div>
           {dividendTxs.length === 0 ? (
             <div className="text-sm text-gray-400 py-4">No dividend transactions recorded yet.</div>
@@ -804,30 +854,50 @@ export default function PolicyPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200">
-                  {['FUND','PAYOUT','PRICE','DATE','METHOD','UNITS','AMOUNT'].map(h => (
-                    <th key={h} className="text-left py-2 pr-4 text-xs tracking-widest text-gray-400 font-normal">{h}</th>
+                  {['FUND','DATE','RATE %','ANNUALISED','NAV','AMOUNT','REINVEST PRICE','UNITS'].map(h => (
+                    <th key={h} className="text-left py-2 pr-3 text-xs tracking-widest text-gray-400 font-normal">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {dividendTxs.map(t => (
-                  <tr key={t.id} className="table-row">
-                    <td className="py-2 pr-4 text-xs">{t.fund_name ? t.fund_name.replace('GreatLink ', '') : '—'}</td>
-                    <td className="py-2 pr-4 text-xs">Dividend</td>
-                    <td className="py-2 pr-4 text-right font-mono text-xs">{t.price ? Number(t.price).toFixed(3) : '—'}</td>
-                    <td className="py-2 pr-4 text-xs text-terracotta font-mono">
-                      {t.date ? new Date(t.date).toLocaleDateString('en-SG', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'}
-                    </td>
-                    <td className="py-2 pr-4 text-xs">Reinvest</td>
-                    <td className="py-2 pr-4 text-right font-mono text-xs">{t.units ? Number(t.units).toFixed(2) : '—'}</td>
-                    <td className="py-2 text-right font-mono text-xs">{t.value ? fmtMoney(Math.abs(parseFloat(t.value))) : '—'}</td>
-                  </tr>
-                ))}
+                {dividendTxs.map(t => {
+                  const rate       = t.dividend_rate != null ? parseFloat(t.dividend_rate) : null
+                  const annualised = rate != null ? (rate * 12).toFixed(4) : null
+                  const nav        = t.nav_at_date  != null ? parseFloat(t.nav_at_date)  : null
+                  const amount     = t.value ? Math.abs(parseFloat(t.value)) : null
+                  return (
+                    <tr key={t.id} className="table-row">
+                      <td className="py-2 pr-3 text-xs">{t.fund_name ? t.fund_name.replace('GreatLink ', '') : '—'}</td>
+                      <td className="py-2 pr-3 text-xs font-mono text-terracotta">
+                        {t.date ? new Date(t.date).toLocaleDateString('en-SG',{day:'2-digit',month:'2-digit',year:'numeric'}) : '—'}
+                      </td>
+                      <td className="py-2 pr-3 text-right font-mono text-xs">
+                        {rate != null ? rate.toFixed(4) + '%' : '—'}
+                      </td>
+                      <td className="py-2 pr-3 text-right font-mono text-xs text-green-700">
+                        {annualised ? annualised + '% p.a.' : '—'}
+                      </td>
+                      <td className="py-2 pr-3 text-right font-mono text-xs">
+                        {nav != null ? fmtMoney(nav) : '—'}
+                      </td>
+                      <td className="py-2 pr-3 text-right font-mono text-xs font-medium">
+                        {amount != null ? fmtMoney(amount) : '—'}
+                      </td>
+                      <td className="py-2 pr-3 text-right font-mono text-xs">
+                        {t.price ? Number(t.price).toFixed(4) : '—'}
+                      </td>
+                      <td className="py-2 text-right font-mono text-xs">
+                        {t.units ? Number(t.units).toFixed(3) : '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
               <tfoot>
                 <tr className="border-t border-gray-200">
-                  <td colSpan={6} className="py-2 text-xs text-gray-400 uppercase tracking-wider">Total Dividend Amount</td>
+                  <td colSpan={5} className="py-2 text-xs text-gray-400 uppercase tracking-wider">Total Dividends Reinvested</td>
                   <td className="py-2 text-right font-mono text-xs font-medium">{fmtMoney(totalDividends)}</td>
+                  <td colSpan={2}></td>
                 </tr>
               </tfoot>
             </table>
@@ -838,7 +908,7 @@ export default function PolicyPage() {
         <div>
           <div className="flex items-center justify-between mb-1">
             <div className="roman">VIII. Transactions</div>
-            <button onClick={() => setShowAddTx(s => !s)}
+            <button onClick={() => showAddTx ? setShowAddTx(false) : openAddTx('Net Investment Premium')}
               className="text-xs text-gray-400 hover:text-gray-700 underline"
               style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
               {showAddTx ? 'Cancel' : '+ Add transaction'}
@@ -847,45 +917,13 @@ export default function PolicyPage() {
           <div className="text-xs text-gray-400 mb-4">Per-fund transaction ledger</div>
 
           {showAddTx && (
-            <div className="border border-gray-200 rounded p-4 mb-4" style={{ background: 'white' }}>
-              <div className="grid grid-cols-6 gap-3 mb-3">
-                <div>
-                  <div className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Date</div>
-                  <input type="date" value={newTx.date} onChange={e => setNewTx(t => ({ ...t, date: e.target.value }))} />
-                </div>
-                <div>
-                  <div className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Type</div>
-                  <select value={newTx.type} onChange={e => setNewTx(t => ({ ...t, type: e.target.value }))}>
-                    {TX_TYPES.map(t => <option key={t}>{t}</option>)}
-                  </select>
-                </div>
-                <div className="col-span-2">
-                  <div className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Fund</div>
-                  <select value={newTx.fund_name} onChange={e => setNewTx(t => ({ ...t, fund_name: e.target.value }))}>
-                    <option value="">Select fund…</option>
-                    {GE_FUNDS.map(f => <option key={f} value={f}>{f}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Price</div>
-                  <input type="number" step="0.000001" placeholder="0.000"
-                    value={newTx.price} onChange={e => setNewTx(t => ({ ...t, price: e.target.value }))} />
-                </div>
-                <div>
-                  <div className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Units</div>
-                  <input type="number" step="0.000001" placeholder="0.000"
-                    value={newTx.units} onChange={e => setNewTx(t => ({ ...t, units: e.target.value }))} />
-                </div>
-              </div>
-              <div className="mb-3">
-                <div className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Value (optional — auto = units × price)</div>
-                <input type="number" step="0.01" placeholder="leave blank to auto-calculate"
-                  value={newTx.value} onChange={e => setNewTx(t => ({ ...t, value: e.target.value }))}
-                  style={{ maxWidth: 220 }} />
-              </div>
-              <button onClick={addTransaction} disabled={savingTx} className="btn-primary text-xs">
-                {savingTx ? 'Saving…' : 'Add Transaction'}
-              </button>
+            <div id="add-tx-form">
+              <SmartTxForm
+                policyId={policyId}
+                transactions={transactions}
+                onSaved={() => { setShowAddTx(false); fetchData() }}
+                onCancel={() => setShowAddTx(false)}
+              />
             </div>
           )}
 
