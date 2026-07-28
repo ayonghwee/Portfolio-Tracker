@@ -520,11 +520,11 @@ export default function PolicyPage() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-8 py-10">
+      <div className="max-w-[1400px] mx-auto px-5 md:px-8 py-10">
 
         {/* ── I. Policy Detail ── */}
         <div className="mb-8">
-          <div className="roman mb-1">I. POLICY DETAIL</div>
+          <div className="section-header mb-2"><span className="roman">I.</span><span className="section-title">POLICY DETAIL</span></div>
           <h1 className="font-display text-5xl font-medium mb-2">{(policy.nickname || policy.policy_number).toUpperCase()}</h1>
           <div className="text-sm text-gray-400">
             <span className="text-terracotta font-mono">{policy.policy_number}</span>
@@ -533,25 +533,29 @@ export default function PolicyPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-4 border-t border-b border-gray-200 mb-10">
-          <div className="stat-card border-r border-gray-200">
-            <div className="text-xs tracking-widest text-gray-400 uppercase mb-2">Assets Under Management</div>
-            <div className="font-display text-3xl font-medium">${fmtMoney(aum)}</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 border-y border-gray-200 divide-x divide-gray-200 mb-10">
+          <div className="px-5 py-5 md:py-6 group relative overflow-hidden">
+            <div className="eyebrow">ASSETS UNDER MANAGEMENT</div>
+            <div className="mt-2 font-display text-3xl md:text-4xl leading-none tracking-tight tabular-nums">${fmtMoney(aum)}</div>
+            <span aria-hidden="true" className="absolute left-5 bottom-0 h-px w-0 bg-terracotta transition-[width] duration-300 group-hover:w-12" />
           </div>
-          <div className="stat-card border-r border-gray-200">
-            <div className="text-xs tracking-widest text-gray-400 uppercase mb-2">Total Invested</div>
-            <div className="font-display text-3xl font-medium">${fmtMoney(policy.invested)}</div>
+          <div className="px-5 py-5 md:py-6 group relative overflow-hidden">
+            <div className="eyebrow">TOTAL INVESTED</div>
+            <div className="mt-2 font-display text-3xl md:text-4xl leading-none tracking-tight tabular-nums">${fmtMoney(policy.invested)}</div>
+            <span aria-hidden="true" className="absolute left-5 bottom-0 h-px w-0 bg-terracotta transition-[width] duration-300 group-hover:w-12" />
           </div>
-          <div className="stat-card border-r border-gray-200">
-            <div className="text-xs tracking-widest text-gray-400 uppercase mb-2">Return on Investment</div>
-            <div className={`font-display text-3xl font-medium ${roi >= 0 ? 'positive' : 'negative'}`}>
+          <div className="px-5 py-5 md:py-6 group relative overflow-hidden">
+            <div className="eyebrow">RETURN ON INVESTMENT</div>
+            <div className={`mt-2 font-display text-3xl md:text-4xl leading-none tracking-tight tabular-nums ${roi >= 0 ? 'positive' : 'negative'}`}>
               {roi != null ? `${roi.toFixed(2)}%` : '—'}
             </div>
+            <span aria-hidden="true" className="absolute left-5 bottom-0 h-px w-0 bg-terracotta transition-[width] duration-300 group-hover:w-12" />
           </div>
-          <div className="stat-card">
-            <div className="text-xs tracking-widest text-gray-400 uppercase mb-2">Duration</div>
-            <div className="font-display text-3xl font-medium leading-tight">{duration}</div>
-            {policy.commenced && <div className="text-xs text-gray-400 mt-1">{fmtDate(policy.commenced)}</div>}
+          <div className="px-5 py-5 md:py-6 group relative overflow-hidden">
+            <div className="eyebrow">DURATION</div>
+            <div className="mt-2 font-display text-2xl md:text-3xl leading-snug tracking-tight">{duration}</div>
+            {policy.commenced && <div className="text-xs mt-1" style={{color:'rgb(103,97,91)'}}>{fmtDate(policy.commenced)}</div>}
+            <span aria-hidden="true" className="absolute left-5 bottom-0 h-px w-0 bg-terracotta transition-[width] duration-300 group-hover:w-12" />
           </div>
         </div>
 
@@ -561,7 +565,7 @@ export default function PolicyPage() {
           {/* II. Profile */}
           <div>
             <div className="flex items-center justify-between mb-3">
-              <div className="roman">II. Profile</div>
+              <div className="section-header"><span className="roman-sm">II.</span><span className="section-title">PROFILE</span></div>
               <button onClick={() => { setEditingPolicy(!editingPolicy); setEditPolicy(policy) }}
                 className="text-xs text-gray-400 hover:text-gray-700 underline"
                 style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
@@ -626,7 +630,7 @@ export default function PolicyPage() {
 
           {/* III. Allocation */}
           <div>
-            <div className="roman mb-1">III. Allocation</div>
+            <div className="section-header mb-2"><span className="roman-sm">III.</span><span className="section-title">ALLOCATION</span></div>
             <div className="text-xs text-gray-400 mb-4">Current portfolio distribution by fund</div>
             {donutData.length > 0 ? (
               <div className="flex flex-col items-center">
@@ -656,7 +660,7 @@ export default function PolicyPage() {
 
         {/* ── IV. Performance over time ── */}
         <div className="mb-10">
-          <div className="roman mb-1">IV. Performance over time</div>
+          <div className="section-header mb-2"><span className="roman-sm">IV.</span><span className="section-title">PERFORMANCE OVER TIME</span></div>
           <div className="text-xs text-gray-400 mb-4">TIV vs TIA monthly trajectory</div>
           <PerformanceChart
             commenced={policy.commenced}
@@ -669,7 +673,7 @@ export default function PolicyPage() {
         {/* ── V. Portfolio summary ── */}
         <div className="mb-10">
           <div className="flex items-center justify-between mb-1">
-            <div className="roman">V. Portfolio summary</div>
+            <div className="section-header"><span className="roman-sm">V.</span><span className="section-title">PORTFOLIO SUMMARY</span></div>
             <div className="flex items-center gap-3">
               {priceStatus && <span className="text-xs text-gray-400">{priceStatus}</span>}
               <button onClick={autoFetchPrices} className="text-xs text-gray-400 hover:text-gray-700 underline"
@@ -821,7 +825,7 @@ export default function PolicyPage() {
         {/* ── VI. Contribution timeline ── */}
         <div className="mb-10">
           <div className="flex items-center justify-between mb-1">
-            <div className="roman">VI. Contribution timeline</div>
+            <div className="section-header"><span className="roman-sm">VI.</span><span className="section-title">CONTRIBUTION TIMELINE</span></div>
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2 text-xs text-gray-400">
                 <button onClick={() => setTimelineYear(y => y - 1)}
@@ -842,7 +846,7 @@ export default function PolicyPage() {
         {/* ── VII. Dividends ── */}
         <div className="mb-10">
           <div className="flex items-center justify-between mb-1">
-            <div className="roman">VII. Dividends</div>
+            <div className="section-header"><span className="roman-sm">VII.</span><span className="section-title">DIVIDENDS</span></div>
             <button onClick={() => { setShowAddTx(true); setTimeout(() => document.getElementById('add-tx-form')?.scrollIntoView({behavior:'smooth'}), 50) }}
               className="text-xs text-gray-400 hover:text-gray-700 underline"
               style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>+ Add dividend</button>
@@ -907,7 +911,7 @@ export default function PolicyPage() {
         {/* ── VIII. Transactions ── */}
         <div>
           <div className="flex items-center justify-between mb-1">
-            <div className="roman">VIII. Transactions</div>
+            <div className="section-header"><span className="roman-sm">VIII.</span><span className="section-title">TRANSACTIONS</span></div>
             <button onClick={() => showAddTx ? setShowAddTx(false) : openAddTx('Net Investment Premium')}
               className="text-xs text-gray-400 hover:text-gray-700 underline"
               style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>

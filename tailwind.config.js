@@ -7,11 +7,12 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        serif: ['Cormorant Garamond', 'Georgia', 'serif'],
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        serif: ['Fraunces', 'Georgia', 'serif'],
+        sans: ['Inter Tight', 'system-ui', 'sans-serif'],
+        display: ['Fraunces', 'Georgia', 'serif'],
       },
       colors: {
-        terracotta: '#c0724a',
+        terracotta: '#C65C2F',
         forest: '#2d5016',
         gold: '#b8963e',
       },
