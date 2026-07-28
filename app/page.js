@@ -36,6 +36,10 @@ export default function LedgerPage() {
   const [priceStatus, setPriceStatus] = useState('')
   const [tooltip, setTooltip] = useState(null)
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 })
+  const [openMenu, setOpenMenu] = useState(null)
+  const [editingPolicy, setEditingPolicy] = useState(null)
+  const [editForm, setEditForm] = useState({})
+  const [deleting, setDeleting] = useState(null)
 
   useEffect(() => {
     setNow(new Date().toLocaleString('en-SG', { timeZone: 'Asia/Singapore', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }))
@@ -118,6 +122,51 @@ export default function LedgerPage() {
     else { setSortCol(col); setSortDir('desc') }
   }
 
+  async function deletePolicy(policy) {
+    if (!confirm(`Delete policy ${policy.policy_number}? This will remove all holdings and transactions. This cannot be undone.`)) return
+    setDeleting(policy.id)
+    await supabase.from('transactions').delete().eq('policy_id', policy.id)
+    await supabase.from('fund_holdings').delete().eq('policy_id', policy.id)
+    await supabase.from('policies').delete().eq('id', policy.id)
+    setDeleting(null)
+    setOpenMenu(null)
+    loadData()
+  }
+
+  function openEdit(policy) {
+    setEditingPolicy(policy.id)
+    setEditForm({
+      nickname: policy.nickname || '',
+      product: policy.product || '',
+      commenced: policy.commenced || '',
+      premium: policy.premium || '',
+      invested: policy.invested || '',
+      frequency: policy.frequency || 'Monthly',
+      charges: policy.charges || '',
+      welcome_bonus: policy.welcome_bonus || '',
+      cash: policy.cash || '',
+      dividends: policy.dividends || '',
+    })
+    setOpenMenu(null)
+  }
+
+  async function saveEdit(policy) {
+    await supabase.from('policies').update({
+      nickname: editForm.nickname,
+      product: editForm.product,
+      commenced: editForm.commenced || null,
+      premium: parseFloat(editForm.premium) || null,
+      invested: parseFloat(editForm.invested) || null,
+      frequency: editForm.frequency,
+      charges: parseFloat(editForm.charges) || null,
+      welcome_bonus: parseFloat(editForm.welcome_bonus) || null,
+      cash: parseFloat(editForm.cash) || null,
+      dividends: parseFloat(editForm.dividends) || null,
+    }).eq('id', policy.id)
+    setEditingPolicy(null)
+    loadData()
+  }
+
   function getSortArrow(col) {
     if (sortCol !== col) return <span className="text-gray-200 ml-1">↕</span>
     return <span className="ml-1" style={{ color: '#2d5016' }}>{sortDir === 'asc' ? '↑' : '↓'}</span>
@@ -188,10 +237,10 @@ export default function LedgerPage() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-8 py-10">
+      <div className="max-w-[1400px] mx-auto px-5 md:px-8 py-10" onClick={() => openMenu && setOpenMenu(null)}>
         <div className="flex items-start justify-between mb-8">
           <div>
-            <div className="roman mb-1">I. PORTFOLIO OVERVIEW</div>
+            <div className="section-header mb-2"><span className="roman">I.</span><span className="section-title">PORTFOLIO OVERVIEW</span></div>
             <h1 className="font-display text-5xl font-medium">The ledger</h1>
           </div>
           <div className="text-right text-xs text-gray-400 mt-2 italic">
@@ -204,23 +253,27 @@ export default function LedgerPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-4 border-t border-b border-gray-200 mb-8">
-          <div className="stat-card border-r border-gray-200">
-            <div className="text-xs tracking-widest text-gray-400 uppercase mb-2">Assets Under Management</div>
-            <div className="font-display text-3xl font-medium">${fmtMoney(totalAUM)}</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 border-y border-gray-200 divide-x divide-gray-200 mb-8">
+          <div className="px-5 py-5 md:py-6 group relative overflow-hidden">
+            <div className="eyebrow">ASSETS UNDER MANAGEMENT</div>
+            <div className="mt-2 font-display text-3xl md:text-4xl leading-none tracking-tight tabular-nums">${fmtMoney(totalAUM)}</div>
+            <span aria-hidden="true" className="absolute left-5 bottom-0 h-px w-0 bg-terracotta transition-[width] duration-300 group-hover:w-12" />
           </div>
-          <div className="stat-card border-r border-gray-200">
-            <div className="text-xs tracking-widest text-gray-400 uppercase mb-2">Total Invested</div>
-            <div className="font-display text-3xl font-medium">${fmtMoney(totalInvested)}</div>
+          <div className="px-5 py-5 md:py-6 group relative overflow-hidden">
+            <div className="eyebrow">TOTAL INVESTED</div>
+            <div className="mt-2 font-display text-3xl md:text-4xl leading-none tracking-tight tabular-nums">${fmtMoney(totalInvested)}</div>
+            <span aria-hidden="true" className="absolute left-5 bottom-0 h-px w-0 bg-terracotta transition-[width] duration-300 group-hover:w-12" />
           </div>
-          <div className="stat-card border-r border-gray-200">
-            <div className="text-xs tracking-widest text-gray-400 uppercase mb-2">Aggregate ROI</div>
-            <div className={`font-display text-3xl font-medium ${aggROI >= 0 ? 'positive' : 'negative'}`}>{aggROI != null ? `${aggROI.toFixed(2)}%` : '—'}</div>
+          <div className="px-5 py-5 md:py-6 group relative overflow-hidden">
+            <div className="eyebrow">AGGREGATE ROI</div>
+            <div className={`mt-2 font-display text-3xl md:text-4xl leading-none tracking-tight tabular-nums ${aggROI >= 0 ? 'positive' : 'negative'}`}>{aggROI != null ? `${aggROI.toFixed(2)}%` : '—'}</div>
+            <span aria-hidden="true" className="absolute left-5 bottom-0 h-px w-0 bg-terracotta transition-[width] duration-300 group-hover:w-12" />
           </div>
-          <div className="stat-card">
-            <div className="text-xs tracking-widest text-gray-400 uppercase mb-2">Portfolios</div>
-            <div className="font-display text-3xl font-medium">{policies.length}</div>
-            <div className="text-xs text-gray-400 mt-1">across all products</div>
+          <div className="px-5 py-5 md:py-6 group relative overflow-hidden">
+            <div className="eyebrow">PORTFOLIOS</div>
+            <div className="mt-2 font-display text-3xl md:text-4xl leading-none tracking-tight tabular-nums">{policies.length}</div>
+            <div className="text-xs mt-1" style={{color:'rgb(103,97,91)'}}>across all products</div>
+            <span aria-hidden="true" className="absolute left-5 bottom-0 h-px w-0 bg-terracotta transition-[width] duration-300 group-hover:w-12" />
           </div>
         </div>
 
@@ -255,6 +308,27 @@ export default function LedgerPage() {
                   No policies yet. <Link href="/policy/new" className="underline text-gray-600">Add your first policy →</Link>
                 </td></tr>
               ) : enriched.map(p => (
+                editingPolicy === p.id ? (
+                  /* ── Inline edit row ── */
+                  <tr key={p.id} className="bg-gray-50 border-b border-gray-200">
+                    <td className="py-2 pr-2 font-mono text-xs text-terracotta">{p.policy_number}</td>
+                    <td className="py-2 pr-2"><input value={editForm.nickname} onChange={e => setEditForm(f=>({...f,nickname:e.target.value}))} placeholder="Nickname" style={{padding:'3px 6px',fontSize:'0.75rem',width:120}} /></td>
+                    <td className="py-2 pr-2"><input value={editForm.product} onChange={e => setEditForm(f=>({...f,product:e.target.value}))} placeholder="Product" style={{padding:'3px 6px',fontSize:'0.75rem',width:160}} /></td>
+                    <td className="py-2 pr-2"><input type="date" value={editForm.commenced} onChange={e => setEditForm(f=>({...f,commenced:e.target.value}))} style={{padding:'3px 6px',fontSize:'0.75rem',width:130}} /></td>
+                    <td className="py-2 pr-2 text-right"><input type="number" value={editForm.premium} onChange={e => setEditForm(f=>({...f,premium:e.target.value}))} placeholder="Premium" style={{padding:'3px 6px',fontSize:'0.75rem',width:90,textAlign:'right'}} /></td>
+                    <td className="py-2 pr-2 text-right"><input type="number" value={editForm.invested} onChange={e => setEditForm(f=>({...f,invested:e.target.value}))} placeholder="Invested" style={{padding:'3px 6px',fontSize:'0.75rem',width:90,textAlign:'right'}} /></td>
+                    <td className="py-2 pr-2 text-right font-mono text-xs text-gray-400">{fmtMoney(p.aum)}</td>
+                    <td className="py-2 pr-2 text-right"><input type="number" value={editForm.cash} onChange={e => setEditForm(f=>({...f,cash:e.target.value}))} placeholder="Cash" style={{padding:'3px 6px',fontSize:'0.75rem',width:80,textAlign:'right'}} /></td>
+                    <td className="py-2 pr-2 text-right"><input type="number" value={editForm.dividends} onChange={e => setEditForm(f=>({...f,dividends:e.target.value}))} placeholder="Divs" style={{padding:'3px 6px',fontSize:'0.75rem',width:80,textAlign:'right'}} /></td>
+                    <td colSpan={2} className="py-2 pr-2"></td>
+                    <td className="py-2">
+                      <div className="flex gap-2">
+                        <button onClick={() => saveEdit(p)} className="btn-primary text-xs" style={{padding:'3px 10px'}}>Save</button>
+                        <button onClick={() => setEditingPolicy(null)} className="btn-secondary text-xs" style={{padding:'3px 10px'}}>Cancel</button>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
                 <tr key={p.id} className="table-row">
                   <td className="py-3 pr-4">
                     <Link href={`/policy/${p.policy_number}`} className="text-terracotta hover:underline font-mono text-xs"
@@ -276,8 +350,37 @@ export default function LedgerPage() {
                   <td className="py-3 pr-4 text-right font-mono text-xs neutral">{p.dividends ? fmtMoney(p.dividends) : '—'}</td>
                   <td className={`py-3 pr-4 text-right text-xs ${p.roi >= 0 ? 'positive' : p.roi < 0 ? 'negative' : ''}`}>{p.roi != null ? `${p.roi >= 0 ? '↑' : '↓'} ${Math.abs(p.roi).toFixed(2)}%` : '—'}</td>
                   <td className={`py-3 pr-4 text-right text-xs ${p.xirr >= 0 ? 'positive' : p.xirr < 0 ? 'negative' : ''}`}>{p.xirr != null ? `${p.xirr.toFixed(2)}%` : '—'}</td>
-                  <td className="py-3"><Link href={`/policy/${p.policy_number}`} className="text-gray-300 hover:text-gray-600 text-lg">···</Link></td>
+                  <td className="py-3 relative">
+                    <button
+                      onClick={e => { e.stopPropagation(); setOpenMenu(openMenu === p.id ? null : p.id) }}
+                      className="text-gray-300 hover:text-gray-600 text-lg px-1"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', lineHeight: 1 }}>
+                      ···
+                    </button>
+                    {openMenu === p.id && (
+                      <div onClick={e => e.stopPropagation()} style={{
+                        position: 'absolute', right: 0, top: '100%', zIndex: 50,
+                        background: 'white', border: '1px solid #e5e5e0', borderRadius: 6,
+                        boxShadow: '0 4px 16px rgba(0,0,0,0.10)', minWidth: 120, overflow: 'hidden'
+                      }}>
+                        <button onClick={() => openEdit(p)}
+                          style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 16px', fontSize: '0.75rem', background: 'none', border: 'none', cursor: 'pointer', color: '#1e1c1a' }}
+                          onMouseEnter={e => e.currentTarget.style.background='#f5f5f0'}
+                          onMouseLeave={e => e.currentTarget.style.background='none'}>
+                          Edit
+                        </button>
+                        <button onClick={() => deletePolicy(p)}
+                          disabled={deleting === p.id}
+                          style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 16px', fontSize: '0.75rem', background: 'none', border: 'none', cursor: 'pointer', color: '#c0392b', borderTop: '1px solid #f0f0ea' }}
+                          onMouseEnter={e => e.currentTarget.style.background='#fff5f5'}
+                          onMouseLeave={e => e.currentTarget.style.background='none'}>
+                          {deleting === p.id ? 'Deleting…' : 'Delete'}
+                        </button>
+                      </div>
+                    )}
+                  </td>
                 </tr>
+                )
               ))}
             </tbody>
           </table>
