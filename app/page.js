@@ -353,27 +353,40 @@ export default function LedgerPage() {
                   <td className="py-3 relative">
                     <button
                       onClick={e => { e.stopPropagation(); setOpenMenu(openMenu === p.id ? null : p.id) }}
-                      className="text-gray-300 hover:text-gray-600 text-lg px-1"
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', lineHeight: 1 }}>
-                      ···
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        width: 28, height: 28, borderRadius: 6, color: '#b0aca8',
+                        transition: 'background 0.15s, color 0.15s' }}
+                      onMouseEnter={e => { e.currentTarget.style.background='#f0ede9'; e.currentTarget.style.color='#1e1c1a' }}
+                      onMouseLeave={e => { e.currentTarget.style.background='none'; e.currentTarget.style.color='#b0aca8' }}>
+                      <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M3.625 7.5a.875.875 0 1 1-1.75 0 .875.875 0 0 1 1.75 0Zm4.25 0a.875.875 0 1 1-1.75 0 .875.875 0 0 1 1.75 0ZM12.125 7.5a.875.875 0 1 1-1.75 0 .875.875 0 0 1 1.75 0Z" fill="currentColor" fillRule="evenodd" clipRule="evenodd"/>
+                      </svg>
                     </button>
                     {openMenu === p.id && (
                       <div onClick={e => e.stopPropagation()} style={{
-                        position: 'absolute', right: 0, top: '100%', zIndex: 50,
-                        background: 'white', border: '1px solid #e5e5e0', borderRadius: 6,
-                        boxShadow: '0 4px 16px rgba(0,0,0,0.10)', minWidth: 120, overflow: 'hidden'
+                        position: 'absolute', right: 4, top: 'calc(100% + 4px)', zIndex: 50,
+                        background: 'white', borderRadius: 8, padding: '4px',
+                        boxShadow: '0 4px 24px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06)',
+                        minWidth: 130, border: '1px solid rgba(0,0,0,0.06)'
                       }}>
                         <button onClick={() => openEdit(p)}
-                          style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 16px', fontSize: '0.75rem', background: 'none', border: 'none', cursor: 'pointer', color: '#1e1c1a' }}
-                          onMouseEnter={e => e.currentTarget.style.background='#f5f5f0'}
+                          style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+                            padding: '6px 10px', fontSize: '0.8rem', background: 'none', border: 'none',
+                            cursor: 'pointer', color: '#1e1c1a', borderRadius: 5, transition: 'background 0.1s' }}
+                          onMouseEnter={e => e.currentTarget.style.background='#f5f3f0'}
                           onMouseLeave={e => e.currentTarget.style.background='none'}>
+                          <svg width="13" height="13" viewBox="0 0 15 15" fill="none"><path d="M11.854.146a.5.5 0 0 0-.707 0l-10 10A.5.5 0 0 0 1 10.5V14a.5.5 0 0 0 .5.5H5a.5.5 0 0 0 .354-.146l10-10a.5.5 0 0 0 0-.708l-3.5-3.5ZM5 13H2v-3l9-9 3 3-9 9Z" fill="currentColor"/></svg>
                           Edit
                         </button>
-                        <button onClick={() => deletePolicy(p)}
-                          disabled={deleting === p.id}
-                          style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 16px', fontSize: '0.75rem', background: 'none', border: 'none', cursor: 'pointer', color: '#c0392b', borderTop: '1px solid #f0f0ea' }}
-                          onMouseEnter={e => e.currentTarget.style.background='#fff5f5'}
+                        <div style={{ height: 1, background: '#f0ede9', margin: '3px 4px' }} />
+                        <button onClick={() => deletePolicy(p)} disabled={deleting === p.id}
+                          style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+                            padding: '6px 10px', fontSize: '0.8rem', background: 'none', border: 'none',
+                            cursor: 'pointer', color: '#c0392b', borderRadius: 5, transition: 'background 0.1s' }}
+                          onMouseEnter={e => e.currentTarget.style.background='#fff2f2'}
                           onMouseLeave={e => e.currentTarget.style.background='none'}>
+                          <svg width="13" height="13" viewBox="0 0 15 15" fill="none"><path d="M5.5 1a.5.5 0 0 0 0 1h4a.5.5 0 0 0 0-1h-4ZM3 3.5a.5.5 0 0 1 .5-.5h8a.5.5 0 0 1 0 1H11v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4H3.5a.5.5 0 0 1-.5-.5ZM5 4v8h5V4H5Z" fill="currentColor" fillRule="evenodd" clipRule="evenodd"/></svg>
                           {deleting === p.id ? 'Deleting…' : 'Delete'}
                         </button>
                       </div>
