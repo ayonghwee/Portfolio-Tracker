@@ -1,10 +1,11 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
 import { fmtMoney, calcROI, calcXIRR } from '../lib/utils'
 
+const GE_URL = 'https://www.greateasternlife.com/bin/corp-site/fund-prices.json?name=gDaily'
 const COLUMNS = [
   { key: 'policy_number', label: 'POLICY #' },
   { key: 'nickname',      label: 'NICKNAME' },
@@ -27,13 +28,12 @@ export default function LedgerPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [now, setNow] = useState('')
-  const [refreshing, setRefreshing] = useState(false)
   const [showNames, setShowNames] = useState(false)
   const [sortCol, setSortCol] = useState('xirr')
   const [sortDir, setSortDir] = useState('desc')
   const [user, setUser] = useState(null)
   const [priceDate, setPriceDate] = useState('')
-  // Hover tooltip state
+  const [priceStatus, setPriceStatus] = useState('')
   const [tooltip, setTooltip] = useState(null)
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 })
 
@@ -56,7 +56,6 @@ export default function LedgerPage() {
 
   async function loadData() {
     setLoading(true)
-    // Load policies + cached prices together for immediate display
     const { data: policiesData } = await supabase.from('policies').select('*, fund_holdings(*)').order('commenced', { ascending: false })
     const { data: cachedPrices } = await supabase.from('price_cache').select('*')
     const priceMap = {}
@@ -66,11 +65,36 @@ export default function LedgerPage() {
     setPolicies(policiesData || [])
     setPrices(priceMap)
     setLoading(false)
-    // Auto-fetch fresh prices from GE in the background on every load
     autoFetchPrices()
   }
 
   async function autoFetchPrices() {
+    setPriceStatus('Updating prices…')
+    try {
+      // Fetch directly from browser (SG IP, bypasses Vercel geo-block)
+      const res = await fetch(GE_URL)
+      if (res.ok) {
+        const data = await res.json()
+        if (data.funds?.length) {
+          const today = new Date().toISOString().split('T')[0]
+          const upserts = data.funds.map(f => ({
+            fund_name: f.fundName,
+            bid_price: parseFloat(f.fundBidPrice),
+            offer_price: parseFloat(f.fundOfferPrice),
+            price_date: f.fundValueDate || today,
+            updated_at: new Date().toISOString()
+          }))
+          await supabase.from('price_cache').upsert(upserts)
+          const pm = {}
+          upserts.forEach(p => { pm[p.fund_name] = p.bid_price })
+          setPrices(pm)
+          setPriceDate(upserts[0]?.price_date || today)
+          setPriceStatus('')
+          return
+        }
+      }
+    } catch { /* CORS blocked — fall back to server */ }
+    // Fall back to server-side
     try {
       const res = await fetch('/api/prices', { method: 'POST' })
       const data = await res.json()
@@ -80,22 +104,8 @@ export default function LedgerPage() {
         setPrices(pm)
         if (data.date) setPriceDate(data.date)
       }
-    } catch { /* silent fail — cached prices still shown */ }
-  }
-
-  async function refreshPrices() {
-    setRefreshing(true)
-    try {
-      const res = await fetch('/api/prices', { method: 'POST' })
-      const data = await res.json()
-      if (data.prices?.length) {
-        const pm = {}
-        data.prices.forEach(p => { pm[p.fund_name] = p.bid_price })
-        setPrices(pm)
-        if (data.date) setPriceDate(data.date)
-      }
-    } catch (e) { console.error(e) }
-    setRefreshing(false)
+    } catch { }
+    setPriceStatus('')
   }
 
   function getAUM(policy) {
@@ -136,7 +146,6 @@ export default function LedgerPage() {
 
   return (
     <div className="min-h-screen" style={{ background: '#fafaf8' }}>
-      {/* Hover tooltip */}
       {tooltip && (
         <div style={{
           position: 'fixed', left: tooltipPos.x + 16, top: tooltipPos.y - 8,
@@ -149,12 +158,11 @@ export default function LedgerPage() {
             <div className="text-xs text-gray-400">No fund holdings</div>
           ) : tooltip.holdings.map((h, i) => {
             const val = h.units * (prices[h.fund_name] || h.last_known_price || 0)
-            const total = tooltip.aum
             return (
               <div key={i} className="flex items-center gap-2 mb-1.5">
                 <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: FUND_COLORS[i % FUND_COLORS.length] }} />
                 <span className="text-xs text-gray-600 flex-1 truncate">{h.fund_name.replace('GreatLink ', '')}</span>
-                <span className="text-xs font-mono text-gray-500 ml-2">{total ? ((val / total) * 100).toFixed(1) : 0}%</span>
+                <span className="text-xs font-mono text-gray-500 ml-2">{tooltip.aum ? ((val / tooltip.aum) * 100).toFixed(1) : 0}%</span>
                 <span className="text-xs font-mono text-gray-700">${fmtMoney(val)}</span>
               </div>
             )
@@ -191,7 +199,7 @@ export default function LedgerPage() {
             <div className="mt-2 text-gray-500">
               AS OF {now}
               {priceDate && <span className="ml-1 text-green-600">· GE prices as of {priceDate}</span>}
-              {refreshing && <span className="ml-2 text-gray-400">· updating…</span>}
+              {priceStatus && <span className="ml-2 text-gray-400">· {priceStatus}</span>}
             </div>
           </div>
         </div>
@@ -249,16 +257,10 @@ export default function LedgerPage() {
               ) : enriched.map(p => (
                 <tr key={p.id} className="table-row">
                   <td className="py-3 pr-4">
-                    <Link
-                      href={`/policy/${p.policy_number}`}
-                      className="text-terracotta hover:underline font-mono text-xs"
-                      onMouseEnter={e => {
-                        setTooltip({ policy_number: p.policy_number, holdings: p.fund_holdings || [], aum: p.aum })
-                        setTooltipPos({ x: e.clientX, y: e.clientY })
-                      }}
+                    <Link href={`/policy/${p.policy_number}`} className="text-terracotta hover:underline font-mono text-xs"
+                      onMouseEnter={e => { setTooltip({ policy_number: p.policy_number, holdings: p.fund_holdings || [], aum: p.aum }); setTooltipPos({ x: e.clientX, y: e.clientY }) }}
                       onMouseLeave={() => setTooltip(null)}
-                      onMouseMove={e => setTooltipPos({ x: e.clientX, y: e.clientY })}
-                    >
+                      onMouseMove={e => setTooltipPos({ x: e.clientX, y: e.clientY })}>
                       {p.policy_number}
                     </Link>
                   </td>

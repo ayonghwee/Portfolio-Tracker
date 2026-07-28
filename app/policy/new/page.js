@@ -174,8 +174,8 @@ export default function NewPolicyPage() {
                   onChange={e => { setInvestedManual(true); updatePolicy('invested', e.target.value) }} />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1 uppercase tracking-wider">Initial Charges (e.g. 3%)</label>
-                <input type="number" step="0.01" placeholder="0.00 e.g. 150 for 3% of 5000" value={policy.charges} onChange={e => updatePolicy('charges', e.target.value)} />
+                <label className="block text-xs text-gray-500 mb-1 uppercase tracking-wider">Initial Charge Rate (%)</label>
+                <input type="number" step="0.01" placeholder="e.g. 3 for 3%" value={policy.charges} onChange={e => updatePolicy('charges', e.target.value)} />
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1 uppercase tracking-wider">Welcome Bonus</label>
