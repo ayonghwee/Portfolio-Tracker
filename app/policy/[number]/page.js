@@ -78,14 +78,15 @@ function DonutChart({ data, size = 220, sw = 24 }) {
   const cx = size / 2, cy = size / 2
   const total = data.reduce((s, d) => s + d.value, 0)
   if (!total || !data.length) return null
+  const GAP = data.length > 1 ? 4 : 0   // 4px gap between segments
   let acc = 0
   return (
     <svg width={size} height={size}>
       {data.map((d, i) => {
-        const dash   = (d.value / total) * C
+        const dash   = Math.max(0, (d.value / total) * C - GAP)
         const gap    = C - dash
         const offset = C / 4 - acc
-        acc += dash
+        acc += (d.value / total) * C   // advance by full slice so gaps stay even
         return (
           <circle key={i} cx={cx} cy={cy} r={r}
             fill="none" stroke={d.color}
@@ -153,7 +154,7 @@ function PerformanceChart({ commenced, invested, aum, transactions }) {
           <g key={v}>
             <line x1={PL} y1={toY(v)} x2={W - PR} y2={toY(v)} stroke="#f3f4f6" strokeWidth="1" />
             <text x={PL - 4} y={toY(v)} textAnchor="end" fontSize="9" fill="#9ca3af" dominantBaseline="middle">
-              {v >= 1000 ? `${(v / 1000).toFixed(0)}` : v}
+              {v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}
             </text>
           </g>
         ))}
@@ -212,7 +213,7 @@ function ContributionTimeline({ transactions, year, holdings }) {
           <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
             <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: 9, color: '#9ca3af', fontWeight: 400, letterSpacing: '0.08em', width: 130, background: '#fafaf8' }}>FUND</th>
             {MONTHS.map(m => (
-              <th key={m} style={{ padding: '6px 4px', textAlign: 'center', fontSize: 9, color: '#9ca3af', fontWeight: 400, letterSpacing: '0.08em', minWidth: 62, background: '#fafaf8' }}>{m}</th>
+              <th key={m} style={{ padding: '6px 4px', textAlign: 'center', fontSize: 9, color: '#9ca3af', fontWeight: 400, letterSpacing: '0.08em', minWidth: 62, background: '#fafaf8', borderLeft: '1px solid #e5e7eb' }}>{m}</th>
             ))}
           </tr>
         </thead>
@@ -225,7 +226,7 @@ function ContributionTimeline({ transactions, year, holdings }) {
               {MONTHS.map((_, mi) => {
                 const txs = getCell(fund, mi)
                 return (
-                  <td key={mi} style={{ padding: '4px 3px', verticalAlign: 'top', fontSize: 8.5, lineHeight: 1.4 }}>
+                  <td key={mi} style={{ padding: '4px 3px', verticalAlign: 'top', fontSize: 8.5, lineHeight: 1.4, borderLeft: '1px solid #e5e7eb' }}>
                     {txs.map((t, j) => {
                       const day = new Date(t.date).getDate().toString().padStart(2, '0')
                       const amt = Math.abs(parseFloat(t.value) || 0)
@@ -527,7 +528,7 @@ export default function PolicyPage() {
           <div className="section-header mb-2"><span className="roman">I.</span><span className="section-title">POLICY DETAIL</span></div>
           <h1 className="font-display text-5xl font-medium mb-2">{(policy.nickname || policy.policy_number).toUpperCase()}</h1>
           <div className="text-sm text-gray-400">
-            <span className="text-terracotta font-mono">{policy.policy_number}</span>
+            <span className="font-mono" style={{ color: '#2c4a6e' }}>{policy.policy_number}</span>
             <span className="mx-2">·</span>
             <span>{policy.product}</span>
           </div>
@@ -686,8 +687,8 @@ export default function PolicyPage() {
             </div>
           </div>
           <div className="text-xs text-gray-400 mb-4">
-            Daily fund prices last updated {priceDate ? new Date(priceDate).toLocaleDateString('en-SG', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
-            {transactions.length > 0 && <span className="ml-2 text-green-600">· Avg prices from {transactions.length} transactions</span>}
+            GE published price date: {priceDate ? new Date(priceDate).toLocaleDateString('en-SG', { day: 'numeric', month: 'long', year: 'numeric' }) : '—'}
+            {transactions.length > 0 && <span className="ml-2 text-green-600">· Avg cost prices calculated from all transactions since inception</span>}
           </div>
 
           {editMode ? (
@@ -734,8 +735,18 @@ export default function PolicyPage() {
               <table className="w-full text-sm" style={{ minWidth: 780 }}>
                 <thead>
                   <tr className="border-b border-gray-200">
-                    {['FUND','UNITS','PRICE','VALUE','AVG PRICE','AVG ROI','NET INFLOW','CURRENT PNL','APPORTIONMENT'].map(h => (
-                      <th key={h} className="text-left py-2 pr-3 text-xs tracking-widest text-gray-400 font-normal">{h}</th>
+                    {[
+                      { label: 'FUND',          align: 'left'  },
+                      { label: 'UNITS',         align: 'right' },
+                      { label: 'PRICE',         align: 'right' },
+                      { label: 'VALUE',         align: 'right' },
+                      { label: 'AVG PRICE',     align: 'right' },
+                      { label: 'AVG ROI',       align: 'right' },
+                      { label: 'NET INFLOW',    align: 'right' },
+                      { label: 'CURRENT PNL',  align: 'right' },
+                      { label: 'APPORTIONMENT',align: 'right' },
+                    ].map(({ label, align }) => (
+                      <th key={label} className="py-2 pr-3 text-xs tracking-widest text-gray-400 font-normal" style={{ textAlign: align }}>{label}</th>
                     ))}
                   </tr>
                 </thead>
@@ -858,8 +869,15 @@ export default function PolicyPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200">
-                  {['FUND','DATE','RATE %','ANNUALISED','NAV','AMOUNT','REINVEST PRICE','UNITS'].map(h => (
-                    <th key={h} className="text-left py-2 pr-3 text-xs tracking-widest text-gray-400 font-normal">{h}</th>
+                  {[
+                    { label: 'FUND',       align: 'left'   },
+                    { label: 'DATE',       align: 'center' },
+                    { label: 'METHOD',     align: 'center' },
+                    { label: 'RATE %',     align: 'right'  },
+                    { label: 'ANNUALISED', align: 'right'  },
+                    { label: 'AMOUNT',     align: 'right'  },
+                  ].map(({ label, align }) => (
+                    <th key={label} className="py-2 pr-3 text-xs tracking-widest text-gray-400 font-normal" style={{ textAlign: align }}>{label}</th>
                   ))}
                 </tr>
               </thead>
@@ -867,31 +885,25 @@ export default function PolicyPage() {
                 {dividendTxs.map(t => {
                   const rate       = t.dividend_rate != null ? parseFloat(t.dividend_rate) : null
                   const annualised = rate != null ? (rate * 12).toFixed(4) : null
-                  const nav        = t.nav_at_date  != null ? parseFloat(t.nav_at_date)  : null
                   const amount     = t.value ? Math.abs(parseFloat(t.value)) : null
+                  const method     = t.type === 'Reinvest' ? 'Reinvest' : 'Cash'
                   return (
                     <tr key={t.id} className="table-row">
-                      <td className="py-2 pr-3 text-xs">{t.fund_name ? t.fund_name.replace('GreatLink ', '') : '—'}</td>
-                      <td className="py-2 pr-3 text-xs font-mono text-terracotta">
-                        {t.date ? new Date(t.date).toLocaleDateString('en-SG',{day:'2-digit',month:'2-digit',year:'numeric'}) : '—'}
+                      <td className="py-2 pr-3">{t.fund_name ? t.fund_name.replace('GreatLink ', '') : '—'}</td>
+                      <td className="py-2 pr-3 font-mono text-center text-gray-500">
+                        {t.date ? new Date(t.date).toLocaleDateString('en-SG',{day:'numeric',month:'short',year:'numeric'}) : '—'}
                       </td>
-                      <td className="py-2 pr-3 text-right font-mono text-xs">
+                      <td className="py-2 pr-3 text-center">
+                        <span className={method === 'Reinvest' ? 'positive' : 'text-gray-500'}>{method}</span>
+                      </td>
+                      <td className="py-2 pr-3 text-right font-mono">
                         {rate != null ? rate.toFixed(4) + '%' : '—'}
                       </td>
-                      <td className="py-2 pr-3 text-right font-mono text-xs text-green-700">
+                      <td className="py-2 pr-3 text-right font-mono text-green-700">
                         {annualised ? annualised + '% p.a.' : '—'}
                       </td>
-                      <td className="py-2 pr-3 text-right font-mono text-xs">
-                        {nav != null ? fmtMoney(nav) : '—'}
-                      </td>
-                      <td className="py-2 pr-3 text-right font-mono text-xs font-medium">
+                      <td className="py-2 text-right font-mono font-medium">
                         {amount != null ? fmtMoney(amount) : '—'}
-                      </td>
-                      <td className="py-2 pr-3 text-right font-mono text-xs">
-                        {t.price ? Number(t.price).toFixed(4) : '—'}
-                      </td>
-                      <td className="py-2 text-right font-mono text-xs">
-                        {t.units ? Number(t.units).toFixed(3) : '—'}
                       </td>
                     </tr>
                   )
@@ -899,9 +911,8 @@ export default function PolicyPage() {
               </tbody>
               <tfoot>
                 <tr className="border-t border-gray-200">
-                  <td colSpan={5} className="py-2 text-xs text-gray-400 uppercase tracking-wider">Total Dividends Reinvested</td>
+                  <td colSpan={5} className="py-2 text-xs text-gray-400 uppercase tracking-wider">Total Dividends</td>
                   <td className="py-2 text-right font-mono text-xs font-medium">{fmtMoney(totalDividends)}</td>
-                  <td colSpan={2}></td>
                 </tr>
               </tfoot>
             </table>
@@ -948,9 +959,10 @@ export default function PolicyPage() {
                 const ret        = avgPrice && price ? ((price - avgPrice) / avgPrice) * 100 : null
                 const currentUnits = fundTxs.length ? fundTxs[fundTxs.length - 1].bal_units : 0
 
-                // totals
-                const totalBeforeUnits = fundTxs.reduce((s, t) => s + Math.abs(t.units_delta || 0), 0)
-                const totalBeforeValue = fundTxs.reduce((s, t) => s + Math.abs(parseFloat(t.value) || 0), 0)
+                // totals — "before fees" counts only purchase-side transactions
+                const purchaseTxs = fundTxs.filter(t => !['Switch Out', 'Welcome Bonus Clawback'].includes(t.type))
+                const totalBeforeUnits = purchaseTxs.reduce((s, t) => s + Math.abs(t.units_delta || 0), 0)
+                const totalBeforeValue = purchaseTxs.reduce((s, t) => s + Math.abs(parseFloat(t.value) || 0), 0)
 
                 return (
                   <div key={fund} className={fi > 0 ? 'mt-8' : ''}>
@@ -972,15 +984,23 @@ export default function PolicyPage() {
                     <table className="w-full text-sm mb-2">
                       <thead>
                         <tr className="border-b border-gray-100">
-                          {['DATE','DESCRIPTION','PRICE','BAL UNITS','UNITS','VALUE',''].map((h, i) => (
-                            <th key={i} className="text-left py-1.5 pr-3 text-xs tracking-widest text-gray-400 font-normal">{h}</th>
+                          {[
+                            { label: 'DATE',        align: 'left'   },
+                            { label: 'DESCRIPTION', align: 'left'   },
+                            { label: 'PRICE',       align: 'right'  },
+                            { label: 'BAL UNITS',   align: 'right'  },
+                            { label: 'UNITS',       align: 'right'  },
+                            { label: 'VALUE',       align: 'right'  },
+                            { label: '',            align: 'center' },
+                          ].map(({ label, align }, i) => (
+                            <th key={i} className="py-1.5 pr-3 text-xs tracking-widest text-gray-400 font-normal" style={{ textAlign: align }}>{label}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {[...fundTxs].reverse().map(tx => (
                           <tr key={tx.id} className="table-row">
-                            <td className="py-2 pr-3 text-xs text-terracotta font-mono">
+                            <td className="py-2 pr-3 font-mono text-gray-400">
                               {tx.date ? new Date(tx.date).toLocaleDateString('en-SG', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'}
                             </td>
                             <td className="py-2 pr-3 text-xs">
