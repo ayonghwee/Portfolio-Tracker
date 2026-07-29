@@ -6,6 +6,30 @@ import { supabase } from '../lib/supabase'
 import { fmtMoney, calcROI, calcXIRR } from '../lib/utils'
 
 const GE_URL = 'https://www.greateasternlife.com/bin/corp-site/fund-prices.json?name=gDaily'
+
+// XIRR values sourced directly from Meow (stored in GE's system, not computed client-side).
+// Update these periodically by re-scraping the Meow clients page.
+const MEOW_XIRR = {
+  '0246597467': 8.97,
+  '0214131662': 6.76,
+  '0250921069': 9.03,
+  '0213749900': 3.48,
+  '0071847552': 6.06,
+  '0252800207': 11.36,
+  '0215020295': 5.98,
+  '0252845534': 11.20,
+  '0236043738': 2.66,
+  '0241859277': 9.52,
+  '0214600201': 8.05,
+  '0212448544': 6.27,
+  '0202882428': 3.41,
+  '0204938752': 7.13,
+  '0236511949': 9.05,
+  '0215890909': 11.09,
+  '0256081716': 9.74,
+  '0256337860': 16.43,
+  '0241567701': 6.33,
+}
 const COLUMNS = [
   { key: 'policy_number', label: 'POLICY #' },
   { key: 'nickname',      label: 'NICKNAME' },
@@ -60,7 +84,7 @@ export default function LedgerPage() {
 
   async function loadData() {
     setLoading(true)
-    const { data: policiesData } = await supabase.from('policies').select('*, fund_holdings(*)').order('commenced', { ascending: false })
+    const { data: policiesData } = await supabase.from('policies').select('*, fund_holdings(*), transactions(date,type,value,fund_name)').order('commenced', { ascending: false })
     const { data: cachedPrices } = await supabase.from('price_cache').select('*')
     const priceMap = {}
     cachedPrices?.forEach(p => { priceMap[p.fund_name] = p.bid_price })
@@ -174,7 +198,7 @@ export default function LedgerPage() {
 
   const enriched = policies
     .filter(p => !search || p.policy_number?.toLowerCase().includes(search.toLowerCase()) || p.nickname?.toLowerCase().includes(search.toLowerCase()) || p.product?.toLowerCase().includes(search.toLowerCase()))
-    .map(p => { const aum = getAUM(p); return { ...p, aum, roi: calcROI(aum, p.invested), xirr: calcXIRR(aum, p.invested, p.commenced) } })
+    .map(p => { const aum = getAUM(p); return { ...p, aum, roi: calcROI(aum, p.invested, p.dividends), xirr: MEOW_XIRR[p.policy_number] ?? calcXIRR(aum, p.transactions, p.invested, p.commenced) } })
     .sort((a, b) => {
       let av = a[sortCol], bv = b[sortCol]
       if (av == null) av = sortDir === 'asc' ? Infinity : -Infinity
@@ -185,7 +209,8 @@ export default function LedgerPage() {
 
   const totalAUM = enriched.reduce((s, p) => s + p.aum, 0)
   const totalInvested = enriched.reduce((s, p) => s + (p.invested || 0), 0)
-  const aggROI = calcROI(totalAUM, totalInvested)
+  const totalDividends = enriched.reduce((s, p) => s + (p.dividends || 0), 0)
+  const aggROI = calcROI(totalAUM, totalInvested, totalDividends)
 
   if (!user && loading) return (
     <div className="min-h-screen flex items-center justify-center" style={{ background: '#fafaf8' }}>
