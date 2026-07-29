@@ -62,7 +62,7 @@ function computeBalanceUnits(transactions) {
     let bal = 0
     result[fund] = txs.map(tx => {
       const u = Math.abs(parseFloat(tx.units) || 0)
-      const delta = tx.type === 'Switch Out' ? -u : u
+      const delta = ['Switch Out', 'Welcome Bonus Clawback'].includes(tx.type) ? -u : u
       bal = Math.max(0, bal + delta)
       return { ...tx, bal_units: bal, units_delta: delta }
     })
