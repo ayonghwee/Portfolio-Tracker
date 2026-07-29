@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '../../../lib/supabase'
@@ -27,6 +27,11 @@ const GE_FUNDS = [
 ]
 
 // ─── helpers ────────────────────────────────────────────────────────────────
+
+const fmtNum = (v, dp = 2) =>
+  v != null && !isNaN(v)
+    ? Number(v).toLocaleString('en-SG', { minimumFractionDigits: dp, maximumFractionDigits: dp })
+    : '—'
 
 function calcAvgPriceFromTx(transactions, fundName) {
   const buys = transactions.filter(t =>
@@ -72,7 +77,7 @@ function computeBalanceUnits(transactions) {
 
 // ─── DonutChart ─────────────────────────────────────────────────────────────
 
-function DonutChart({ data, size = 220, sw = 24 }) {
+function DonutChart({ data, size = 220, sw = 40 }) {
   const r = size / 2 - sw / 2
   const C = 2 * Math.PI * r
   const cx = size / 2, cy = size / 2
@@ -102,8 +107,9 @@ function DonutChart({ data, size = 220, sw = 24 }) {
 // ─── PerformanceChart (Section IV) ──────────────────────────────────────────
 
 function PerformanceChart({ commenced, invested, aum, transactions }) {
+  const [showBenchmark, setShowBenchmark] = React.useState(false)
   if (!commenced || !aum) return null
-  const W = 800, H = 200, PL = 52, PR = 20, PT = 16, PB = 28
+  const W = 800, H = 200, PL = 72, PR = 20, PT = 16, PB = 28
   const CW = W - PL - PR, CH = H - PT - PB
   const start = new Date(commenced), now = new Date()
 
@@ -141,25 +147,46 @@ function PerformanceChart({ commenced, invested, aum, transactions }) {
 
   const xStep = Math.max(1, Math.ceil(months.length / 14))
 
-  const tiaPath = tiaPoints.map((v, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(v).toFixed(1)}`).join(' ')
-  const tivPath = tivPoints.map((v, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(v).toFixed(1)}`).join(' ')
+  const YEAR_MS = 365.25 * 24 * 3600 * 1000
+  const bmPoints = months.map(m => (invested || 0) * Math.pow(1.06, (m - start) / YEAR_MS))
+
+  const allV2 = showBenchmark ? [...tiaPoints, ...tivPoints, ...bmPoints] : [...tiaPoints, ...tivPoints]
+  const minV2  = Math.max(0, Math.min(...allV2) * 0.9)
+  const maxV2  = Math.max(...allV2) * 1.05
+  const range2 = maxV2 - minV2 || 1
+  const toY2   = v => PT + CH - ((v - minV2) / range2) * CH
+
+  const tiaPath = tiaPoints.map((v, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY2(v).toFixed(1)}`).join(' ')
+  const tivPath = tivPoints.map((v, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY2(v).toFixed(1)}`).join(' ')
+  const bmPath  = bmPoints.map((v, i)  => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY2(v).toFixed(1)}`).join(' ')
+
+  const yStep2 = Math.ceil((maxV2 - minV2) / 4 / 500) * 500 || 1000
+  const yTicks2 = []
+  for (let v = Math.ceil(minV2 / yStep2) * yStep2; v <= maxV2; v += yStep2) yTicks2.push(v)
 
   return (
     <div style={{ border: '1px solid #e5e7eb', padding: '16px 16px 8px', background: 'white' }}>
-      <div className="text-xs text-gray-400 uppercase tracking-widest mb-3">
-        INVESTMENT GROWTH &nbsp;·&nbsp; Updated {new Date().toLocaleDateString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div className="text-xs text-gray-400 uppercase tracking-widest">
+          INVESTMENT GROWTH &nbsp;·&nbsp; Updated {new Date().toLocaleDateString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+        </div>
+        <button onClick={() => setShowBenchmark(b => !b)}
+          style={{ fontSize: 10, letterSpacing: '0.08em', background: 'none', border: '1px solid #e5e7eb', borderRadius: 3, padding: '2px 8px', cursor: 'pointer', color: showBenchmark ? '#2c4a6e' : '#9ca3af' }}>
+          {showBenchmark ? 'HIDE BENCHMARK' : 'SHOW BENCHMARK'}
+        </button>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
-        {yTicks.map(v => (
+        {yTicks2.map(v => (
           <g key={v}>
-            <line x1={PL} y1={toY(v)} x2={W - PR} y2={toY(v)} stroke="#f3f4f6" strokeWidth="1" />
-            <text x={PL - 4} y={toY(v)} textAnchor="end" fontSize="9" fill="#9ca3af" dominantBaseline="middle">
-              {v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}
+            <line x1={PL} y1={toY2(v)} x2={W - PR} y2={toY2(v)} stroke="#f3f4f6" strokeWidth="1" />
+            <text x={PL - 4} y={toY2(v)} textAnchor="end" fontSize="9" fill="#9ca3af" dominantBaseline="middle">
+              {v.toLocaleString('en-SG')}
             </text>
           </g>
         ))}
         <path d={tiaPath} fill="none" stroke="#c0c0c0" strokeWidth="1.5" strokeDasharray="5 3" />
         <path d={tivPath} fill="none" stroke="#2d5016" strokeWidth="2" />
+        {showBenchmark && <path d={bmPath} fill="none" stroke="#b8963e" strokeWidth="1.5" strokeDasharray="4 4" />}
         {months.map((m, i) => {
           if (i % xStep !== 0 && i !== months.length - 1) return null
           return (
@@ -178,6 +205,12 @@ function PerformanceChart({ commenced, invested, aum, transactions }) {
           <svg width="20" height="8"><line x1="0" y1="4" x2="20" y2="4" stroke="#c0c0c0" strokeWidth="1.5" strokeDasharray="5 3" /></svg>
           Total Investment Amount
         </span>
+        {showBenchmark && (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#6b7280' }}>
+            <svg width="20" height="8"><line x1="0" y1="4" x2="20" y2="4" stroke="#b8963e" strokeWidth="1.5" strokeDasharray="4 4" /></svg>
+            Benchmark (6% p.a.)
+          </span>
+        )}
       </div>
     </div>
   )
@@ -228,14 +261,15 @@ function ContributionTimeline({ transactions, year, holdings }) {
                 return (
                   <td key={mi} style={{ padding: '4px 3px', verticalAlign: 'top', fontSize: 8.5, lineHeight: 1.4, borderLeft: '1px solid #e5e7eb' }}>
                     {txs.map((t, j) => {
-                      const day = new Date(t.date).getDate().toString().padStart(2, '0')
+                      const d = new Date(t.date)
+                      const day = `${d.getDate().toString().padStart(2,'0')} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}`
                       const amt = Math.abs(parseFloat(t.value) || 0)
                       const isOut = t.type === 'Switch Out'
                       const label = t.type === 'Net Investment Premium' ? 'Premium' : t.type === 'Welcome Bonus' ? 'Bonus' : null
                       return (
                         <div key={j} style={{ marginBottom: 2, color: isOut ? '#c0724a' : '#2d5016' }}>
                           <div>{isOut ? '↑' : '↓'} {day} {fmtMoney(amt)}</div>
-                          {label && <div style={{ color: '#9ca3af', fontSize: 8 }}>— {label}</div>}
+                          {label && <div style={{ color: '#9ca3af', fontSize: 7.5 }}>— {label}</div>}
                         </div>
                       )
                     })}
@@ -635,7 +669,7 @@ export default function PolicyPage() {
             <div className="text-xs text-gray-400 mb-4">Current portfolio distribution by fund</div>
             {donutData.length > 0 ? (
               <div className="flex flex-col items-center">
-                <DonutChart data={donutData} size={220} sw={26} />
+                <DonutChart data={donutData} size={220} sw={40} />
                 <div className="mt-4 space-y-1.5 w-full">
                   {donutData.map((d, i) => (
                     <div key={i} className="flex items-center gap-2 text-xs">
@@ -775,10 +809,10 @@ export default function PolicyPage() {
                             {avgFromTx && <span className="text-xs text-green-500" title="Avg from tx">●</span>}
                           </div>
                         </td>
-                        <td className="py-3 pr-3 text-right font-mono text-xs">{Number(h.units).toFixed(2)}</td>
+                        <td className="py-3 pr-3 text-right font-mono text-xs">{fmtNum(h.units, 2)}</td>
                         <td className="py-3 pr-3 text-right font-mono text-xs">
                           {price ? (
-                            <span className="text-forest">{Number(price).toFixed(3)}</span>
+                            <span className="text-forest">{fmtNum(price, 3)}</span>
                           ) : (
                             <input type="number" step="0.001" placeholder="Enter"
                               className="w-20 text-right text-xs py-0.5 px-1"
@@ -788,7 +822,7 @@ export default function PolicyPage() {
                         </td>
                         <td className="py-3 pr-3 text-right font-mono text-xs">{fmtMoney(value)}</td>
                         <td className="py-3 pr-3 text-right font-mono text-xs">
-                          {avgPrice ? <span className={avgFromTx ? 'text-green-600' : ''}>{Number(avgPrice).toFixed(3)}</span> : '—'}
+                          {avgPrice ? <span className={avgFromTx ? 'text-green-600' : ''}>{fmtNum(avgPrice, 3)}</span> : '—'}
                         </td>
                         <td className={`py-3 pr-3 text-right text-xs ${ret == null ? 'neutral' : ret >= 0 ? 'positive' : 'negative'}`}>
                           {ret != null ? `${ret >= 0 ? '+' : ''}${ret.toFixed(2)}%` : 'N/A'}
@@ -808,23 +842,23 @@ export default function PolicyPage() {
                   <tfoot>
                     <tr className="border-t border-gray-200">
                       <td colSpan={3} className="py-2 text-xs text-gray-400 uppercase tracking-wider">Total Investment Value</td>
-                      <td className="py-2 text-right font-mono text-sm font-medium" colSpan={6}>{fmtMoney(aum)}</td>
+                      <td className="py-2 text-right font-mono font-semibold text-base" colSpan={6}>${fmtMoney(aum)}</td>
                     </tr>
                     <tr>
                       <td colSpan={3} className="py-1 text-xs text-gray-400 uppercase tracking-wider">Total Dividends Received</td>
-                      <td className="py-1 text-right font-mono text-xs" colSpan={6}>{fmtMoney(totalDividends)}</td>
+                      <td className="py-1 text-right font-mono font-semibold text-base" colSpan={6}>${fmtMoney(totalDividends)}</td>
                     </tr>
                     <tr>
                       <td colSpan={3} className="py-1 text-xs text-gray-400 uppercase tracking-wider">Total Investment Amount</td>
-                      <td className="py-1 text-right font-mono text-xs" colSpan={6}>{fmtMoney(policy.invested)}</td>
+                      <td className="py-1 text-right font-mono text-xs" colSpan={6}>${fmtMoney(policy.invested)}</td>
                     </tr>
                     <tr>
                       <td colSpan={3} className="py-1 text-xs text-gray-400 uppercase tracking-wider">Return on Investment</td>
-                      <td className={`py-1 text-right font-mono text-xs ${roi >= 0 ? 'positive' : 'negative'}`} colSpan={6}>{roi != null ? `${roi.toFixed(2)}%` : '—'}</td>
+                      <td className={`py-1 text-right font-mono text-sm ${roi >= 0 ? 'positive' : 'negative'}`} colSpan={6}>{roi != null ? `${roi.toFixed(2)}%` : '—'}</td>
                     </tr>
                     <tr>
                       <td colSpan={3} className="py-1 text-xs text-gray-400 uppercase tracking-wider">XIRR</td>
-                      <td className={`py-1 text-right font-mono text-xs ${xirr >= 0 ? 'positive' : 'negative'}`} colSpan={6}>{xirr != null ? `${xirr.toFixed(2)}%` : '—'}</td>
+                      <td className={`py-1 text-right font-mono text-sm ${xirr >= 0 ? 'positive' : 'negative'}`} colSpan={6}>{xirr != null ? `${xirr.toFixed(2)}%` : '—'}</td>
                     </tr>
                   </tfoot>
                 )}
@@ -973,8 +1007,8 @@ export default function PolicyPage() {
                         <span className="font-medium text-sm">{fund.replace('GreatLink ', '')}</span>
                       </div>
                       <div className="flex items-center gap-6 text-xs text-gray-400">
-                        <span>AVG PRICE <span className="text-gray-700 font-mono ml-1">{avgPrice ? Number(avgPrice).toFixed(3) : '—'}</span></span>
-                        <span>CURRENT PRICE <span className="text-gray-700 font-mono ml-1">{price ? Number(price).toFixed(3) : '—'}</span></span>
+                        <span>AVG PRICE <span className="text-gray-700 font-mono ml-1">{avgPrice ? fmtNum(avgPrice, 3) : '—'}</span></span>
+                        <span>CURRENT PRICE <span className="text-gray-700 font-mono ml-1">{price ? fmtNum(price, 3) : '—'}</span></span>
                         <span className={`ml-1 font-mono ${ret == null ? '' : ret >= 0 ? 'positive' : 'negative'}`}>
                           {ret != null ? `${ret >= 0 ? '+' : ''}${ret.toFixed(2)}%` : 'N/A'}
                         </span>
@@ -1006,11 +1040,11 @@ export default function PolicyPage() {
                             <td className="py-2 pr-3 text-xs">
                               <span className={tx.type === 'Switch Out' ? 'negative' : tx.type === 'Switch In' ? 'positive' : 'neutral'}>{tx.type}</span>
                             </td>
-                            <td className="py-2 pr-3 text-right font-mono text-xs">{tx.price ? Number(tx.price).toFixed(3) : '—'}</td>
-                            <td className="py-2 pr-3 text-right font-mono text-xs">{tx.bal_units != null ? Number(tx.bal_units).toFixed(2) : '—'}</td>
+                            <td className="py-2 pr-3 text-right font-mono text-xs">{tx.price ? fmtNum(tx.price, 3) : '—'}</td>
+                            <td className="py-2 pr-3 text-right font-mono text-xs">{tx.bal_units != null ? fmtNum(tx.bal_units, 2) : '—'}</td>
                             <td className="py-2 pr-3 text-right font-mono text-xs">
                               <span className={tx.type === 'Switch Out' ? 'negative' : ''}>
-                                {tx.units_delta != null ? Number(Math.abs(tx.units_delta)).toFixed(2) : '—'}
+                                {tx.units_delta != null ? fmtNum(Math.abs(tx.units_delta), 2) : '—'}
                               </span>
                             </td>
                             <td className="py-2 pr-3 text-right font-mono text-xs">
@@ -1029,15 +1063,15 @@ export default function PolicyPage() {
                       <tfoot>
                         <tr className="border-t border-gray-100">
                           <td colSpan={3} className="py-1 text-xs text-gray-400 uppercase tracking-wider">Total (before fees)</td>
-                          <td className="py-1 text-right font-mono text-xs">{Number(currentUnits).toFixed(2)}</td>
-                          <td className="py-1 text-right font-mono text-xs">{Number(totalBeforeUnits).toFixed(2)}</td>
+                          <td className="py-1 text-right font-mono text-xs">{fmtNum(currentUnits, 2)}</td>
+                          <td className="py-1 text-right font-mono text-xs">{fmtNum(totalBeforeUnits, 2)}</td>
                           <td className="py-1 text-right font-mono text-xs">{fmtMoney(totalBeforeValue)}</td>
                           <td />
                         </tr>
                         <tr>
                           <td colSpan={3} className="py-1 text-xs text-gray-400 uppercase tracking-wider">Total (after fees)</td>
-                          <td className="py-1 text-right font-mono text-xs">{Number(currentUnits).toFixed(2)}</td>
-                          <td className="py-1 text-right font-mono text-xs">{Number(currentUnits).toFixed(2)}</td>
+                          <td className="py-1 text-right font-mono text-xs">{fmtNum(currentUnits, 2)}</td>
+                          <td className="py-1 text-right font-mono text-xs">{fmtNum(currentUnits, 2)}</td>
                           <td className="py-1 text-right font-mono text-xs">
                             {fmtMoney(currentUnits * (price || holding?.last_known_price || 0))}
                           </td>
