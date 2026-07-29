@@ -3,8 +3,8 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  'https://oeegjflkqfkxgtfzxbny.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9lZWdqZmxrcWZreGd0Znp4Ym55Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0NTkwMjA1MywiZXhwIjoyMDYxNDc4MDUzfQ.PkBNcELJCOLGNVMFMoBPrFZJIhv9nAYpL5q8FmNiMaM'
 )
 
 export async function POST(req) {
