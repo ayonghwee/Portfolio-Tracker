@@ -62,7 +62,7 @@ function computeBalanceUnits(transactions) {
     let bal = 0
     result[fund] = txs.map(tx => {
       const u = Math.abs(parseFloat(tx.units) || 0)
-      const delta = tx.type === 'Switch Out' ? -u : u
+      const delta = ['Switch Out', 'Welcome Bonus Clawback'].includes(tx.type) ? -u : u
       bal = Math.max(0, bal + delta)
       return { ...tx, bal_units: bal, units_delta: delta }
     })
@@ -473,8 +473,8 @@ export default function PolicyPage() {
 
   // ── derived values ──
   const aum  = holdings.reduce((s, h) => s + h.units * (prices[h.fund_name] || h.last_known_price || 0), 0)
-  const roi  = calcROI(aum, policy.invested)
-  const xirr = calcXIRR(aum, policy.invested, policy.commenced)
+  const roi  = calcROI(aum, policy.invested, policy.dividends)
+  const xirr = calcXIRR(aum, transactions, policy.invested, policy.commenced)
   const duration = calcDuration(policy.commenced)
 
   const donutData = holdings.map((h, i) => ({
