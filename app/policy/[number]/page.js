@@ -78,28 +78,46 @@ function computeBalanceUnits(transactions) {
 // ─── DonutChart ─────────────────────────────────────────────────────────────
 
 function DonutChart({ data, size = 220, sw = 40 }) {
+  const [hovered, setHovered] = React.useState(null)
   const r = size / 2 - sw / 2
   const C = 2 * Math.PI * r
   const cx = size / 2, cy = size / 2
   const total = data.reduce((s, d) => s + d.value, 0)
   if (!total || !data.length) return null
-  const GAP = data.length > 1 ? 4 : 0   // 4px gap between segments
+  const GAP = data.length > 1 ? 4 : 0
   let acc = 0
+  const h = hovered != null ? data[hovered] : null
   return (
-    <svg width={size} height={size}>
+    <svg width={size} height={size} style={{ overflow: 'visible' }}>
       {data.map((d, i) => {
         const dash   = Math.max(0, (d.value / total) * C - GAP)
         const gap    = C - dash
         const offset = C / 4 - acc
-        acc += (d.value / total) * C   // advance by full slice so gaps stay even
+        acc += (d.value / total) * C
         return (
           <circle key={i} cx={cx} cy={cy} r={r}
             fill="none" stroke={d.color}
-            strokeWidth={sw} strokeLinecap="butt"
+            strokeWidth={hovered === i ? sw + 6 : sw} strokeLinecap="butt"
             strokeDasharray={`${dash} ${gap}`} strokeDashoffset={offset}
+            style={{ cursor: 'pointer', transition: 'stroke-width 0.15s' }}
+            onMouseEnter={() => setHovered(i)}
+            onMouseLeave={() => setHovered(null)}
           />
         )
       })}
+      {h && (
+        <>
+          <text x={cx} y={cy - 8} textAnchor="middle" fontSize="10" fill="#6b7280" style={{ pointerEvents: 'none' }}>
+            {h.label.length > 14 ? h.label.slice(0, 14) + '…' : h.label}
+          </text>
+          <text x={cx} y={cy + 10} textAnchor="middle" fontSize="18" fill={h.color} fontWeight="600" style={{ pointerEvents: 'none' }}>
+            {((h.value / total) * 100).toFixed(1)}%
+          </text>
+          <text x={cx} y={cy + 26} textAnchor="middle" fontSize="10" fill="#9ca3af" style={{ pointerEvents: 'none' }}>
+            ${h.value.toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </text>
+        </>
+      )}
     </svg>
   )
 }
@@ -108,6 +126,7 @@ function DonutChart({ data, size = 220, sw = 40 }) {
 
 function PerformanceChart({ commenced, invested, aum, transactions }) {
   const [showBenchmark, setShowBenchmark] = React.useState(false)
+  const [tooltip, setTooltip] = React.useState(null)
   if (!commenced || !aum) return null
   const W = 800, H = 200, PL = 72, PR = 20, PT = 16, PB = 28
   const CW = W - PL - PR, CH = H - PT - PB
@@ -175,7 +194,17 @@ function PerformanceChart({ commenced, invested, aum, transactions }) {
           {showBenchmark ? 'HIDE BENCHMARK' : 'SHOW BENCHMARK'}
         </button>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block', cursor: 'crosshair' }}
+        onMouseMove={e => {
+          const svg = e.currentTarget
+          const rect = svg.getBoundingClientRect()
+          const svgX = ((e.clientX - rect.left) / rect.width) * W
+          const idx = Math.round(((svgX - PL) / CW) * (months.length - 1))
+          if (idx >= 0 && idx < months.length) {
+            setTooltip({ idx, x: toX(idx), tia: tiaPoints[idx], tiv: tivPoints[idx], bm: bmPoints[idx], month: months[idx] })
+          }
+        }}
+        onMouseLeave={() => setTooltip(null)}>
         {yTicks2.map(v => (
           <g key={v}>
             <line x1={PL} y1={toY2(v)} x2={W - PR} y2={toY2(v)} stroke="#f3f4f6" strokeWidth="1" />
@@ -195,6 +224,28 @@ function PerformanceChart({ commenced, invested, aum, transactions }) {
             </text>
           )
         })}
+        {tooltip && (() => {
+          const tx = tooltip.x
+          const tipW = showBenchmark ? 148 : 132
+          const tipH = showBenchmark ? 58 : 48
+          const tipX = tx + tipW + 12 > W - PR ? tx - tipW - 8 : tx + 8
+          const fmt0 = v => '$' + Math.round(v).toLocaleString('en-SG')
+          return (
+            <g>
+              <line x1={tx} y1={PT} x2={tx} y2={PT + CH} stroke="#9ca3af" strokeWidth="1" strokeDasharray="3 2" />
+              <circle cx={tx} cy={toY2(tooltip.tiv)} r="3" fill="#2d5016" />
+              <circle cx={tx} cy={toY2(tooltip.tia)} r="3" fill="#c0c0c0" />
+              {showBenchmark && <circle cx={tx} cy={toY2(tooltip.bm)} r="3" fill="#b8963e" />}
+              <rect x={tipX} y={PT + 4} width={tipW} height={tipH} fill="white" stroke="#e5e7eb" strokeWidth="1" rx="3" />
+              <text x={tipX + 8} y={PT + 17} fontSize="8.5" fill="#6b7280" fontWeight="500">
+                {tooltip.month.toLocaleDateString('en-SG', { month: 'short', year: 'numeric' })}
+              </text>
+              <text x={tipX + 8} y={PT + 30} fontSize="8.5" fill="#2d5016">TIV {fmt0(tooltip.tiv)}</text>
+              <text x={tipX + 8} y={PT + 42} fontSize="8.5" fill="#9ca3af">TIA {fmt0(tooltip.tia)}</text>
+              {showBenchmark && <text x={tipX + 8} y={PT + 54} fontSize="8.5" fill="#b8963e">BM  {fmt0(tooltip.bm)}</text>}
+            </g>
+          )
+        })()}
       </svg>
       <div style={{ display: 'flex', justifyContent: 'center', gap: 32, marginTop: 6 }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#6b7280' }}>
@@ -806,13 +857,12 @@ export default function PolicyPage() {
                           <div className="flex items-center gap-2">
                             <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: FUND_COLORS[i % FUND_COLORS.length] }} />
                             <span className="text-xs">{h.fund_name.replace('GreatLink ', '')}</span>
-                            {avgFromTx && <span className="text-xs text-green-500" title="Avg from tx">●</span>}
                           </div>
                         </td>
                         <td className="py-3 pr-3 text-right font-mono text-xs">{fmtNum(h.units, 2)}</td>
                         <td className="py-3 pr-3 text-right font-mono text-xs">
                           {price ? (
-                            <span className="text-forest">{fmtNum(price, 3)}</span>
+                            <span>{fmtNum(price, 3)}</span>
                           ) : (
                             <input type="number" step="0.001" placeholder="Enter"
                               className="w-20 text-right text-xs py-0.5 px-1"
@@ -822,7 +872,7 @@ export default function PolicyPage() {
                         </td>
                         <td className="py-3 pr-3 text-right font-mono text-xs">{fmtMoney(value)}</td>
                         <td className="py-3 pr-3 text-right font-mono text-xs">
-                          {avgPrice ? <span className={avgFromTx ? 'text-green-600' : ''}>{fmtNum(avgPrice, 3)}</span> : '—'}
+                          {avgPrice ? fmtNum(avgPrice, 3) : '—'}
                         </td>
                         <td className={`py-3 pr-3 text-right text-xs ${ret == null ? 'neutral' : ret >= 0 ? 'positive' : 'negative'}`}>
                           {ret != null ? `${ret >= 0 ? '+' : ''}${ret.toFixed(2)}%` : 'N/A'}
@@ -846,7 +896,7 @@ export default function PolicyPage() {
                     </tr>
                     <tr>
                       <td colSpan={3} className="py-1 text-xs text-gray-400 uppercase tracking-wider">Total Dividends Received</td>
-                      <td className="py-1 text-right font-mono font-semibold text-base" colSpan={6}>${fmtMoney(totalDividends)}</td>
+                      <td className="py-1 text-right font-mono font-semibold text-base" colSpan={6}>${fmtMoney(policy.dividends || 0)}</td>
                     </tr>
                     <tr>
                       <td colSpan={3} className="py-1 text-xs text-gray-400 uppercase tracking-wider">Total Investment Amount</td>
@@ -905,10 +955,11 @@ export default function PolicyPage() {
                 <tr className="border-b border-gray-200">
                   {[
                     { label: 'FUND',       align: 'left'   },
+                    { label: 'PAYOUT',     align: 'center' },
+                    { label: 'RATE',       align: 'right'  },
+                    { label: 'ANNUALISED', align: 'right'  },
                     { label: 'DATE',       align: 'center' },
                     { label: 'METHOD',     align: 'center' },
-                    { label: 'RATE %',     align: 'right'  },
-                    { label: 'ANNUALISED', align: 'right'  },
                     { label: 'AMOUNT',     align: 'right'  },
                   ].map(({ label, align }) => (
                     <th key={label} className="py-2 pr-3 text-xs tracking-widest text-gray-400 font-normal" style={{ textAlign: align }}>{label}</th>
@@ -918,25 +969,26 @@ export default function PolicyPage() {
               <tbody>
                 {dividendTxs.map(t => {
                   const rate       = t.dividend_rate != null ? parseFloat(t.dividend_rate) : null
-                  const annualised = rate != null ? (rate * 12).toFixed(4) : null
+                  const annualised = rate != null ? (rate * 12).toFixed(3) : null
                   const amount     = t.value ? Math.abs(parseFloat(t.value)) : null
-                  const method     = t.type === 'Reinvest' ? 'Reinvest' : 'Cash'
+                  const method     = t.type === 'Reinvest' ? 'Reinvest' : (t.payment_method || 'Cash')
                   return (
                     <tr key={t.id} className="table-row">
-                      <td className="py-2 pr-3">{t.fund_name ? t.fund_name.replace('GreatLink ', '') : '—'}</td>
-                      <td className="py-2 pr-3 font-mono text-center text-gray-500">
-                        {t.date ? new Date(t.date).toLocaleDateString('en-SG',{day:'numeric',month:'short',year:'numeric'}) : '—'}
+                      <td className="py-2 pr-3 text-xs">{t.fund_name ? t.fund_name.replace('GreatLink ', '') : '—'}</td>
+                      <td className="py-2 pr-3 text-center text-xs text-gray-400">Dividend</td>
+                      <td className="py-2 pr-3 text-right font-mono text-xs">
+                        {rate != null ? rate.toFixed(3) : '—'}
                       </td>
-                      <td className="py-2 pr-3 text-center">
+                      <td className="py-2 pr-3 text-right font-mono text-xs">
+                        {annualised || '—'}
+                      </td>
+                      <td className="py-2 pr-3 font-mono text-center text-gray-500 text-xs">
+                        {t.date ? new Date(t.date).toLocaleDateString('en-SG',{day:'2-digit',month:'short',year:'numeric'}) : '—'}
+                      </td>
+                      <td className="py-2 pr-3 text-center text-xs">
                         <span className={method === 'Reinvest' ? 'positive' : 'text-gray-500'}>{method}</span>
                       </td>
-                      <td className="py-2 pr-3 text-right font-mono">
-                        {rate != null ? rate.toFixed(4) + '%' : '—'}
-                      </td>
-                      <td className="py-2 pr-3 text-right font-mono text-green-700">
-                        {annualised ? annualised + '% p.a.' : '—'}
-                      </td>
-                      <td className="py-2 text-right font-mono font-medium">
+                      <td className="py-2 text-right font-mono font-medium text-xs">
                         {amount != null ? fmtMoney(amount) : '—'}
                       </td>
                     </tr>
@@ -945,7 +997,7 @@ export default function PolicyPage() {
               </tbody>
               <tfoot>
                 <tr className="border-t border-gray-200">
-                  <td colSpan={5} className="py-2 text-xs text-gray-400 uppercase tracking-wider">Total Dividends</td>
+                  <td colSpan={6} className="py-2 text-xs text-gray-400 uppercase tracking-wider">Total Dividend Amount</td>
                   <td className="py-2 text-right font-mono text-xs font-medium">{fmtMoney(totalDividends)}</td>
                 </tr>
               </tfoot>
@@ -993,10 +1045,17 @@ export default function PolicyPage() {
                 const ret        = avgPrice && price ? ((price - avgPrice) / avgPrice) * 100 : null
                 const currentUnits = fundTxs.length ? fundTxs[fundTxs.length - 1].bal_units : 0
 
-                // totals — "before fees" counts only purchase-side transactions
-                const purchaseTxs = fundTxs.filter(t => !['Switch Out', 'Welcome Bonus Clawback'].includes(t.type))
-                const totalBeforeUnits = purchaseTxs.reduce((s, t) => s + Math.abs(t.units_delta || 0), 0)
-                const totalBeforeValue = purchaseTxs.reduce((s, t) => s + Math.abs(parseFloat(t.value) || 0), 0)
+                // totals — Meow's "before fees" = NET signed sum of all transactions
+                const totalBeforeUnits = fundTxs.reduce((s, t) => s + (t.units_delta || 0), 0)  // units_delta already signed
+                const totalBeforeValue = fundTxs.reduce((s, t) => {
+                  const v = Math.abs(parseFloat(t.value) || 0)
+                  return s + (['Switch Out', 'Welcome Bonus Clawback'].includes(t.type) ? -v : v)
+                }, 0)
+                // "after fees" value = current units × avg cost (= before value / before units)
+                const avgCost = Math.abs(totalBeforeUnits) > 0.001 ? totalBeforeValue / totalBeforeUnits : null
+                const afterFeesValue = avgCost != null
+                  ? currentUnits * avgCost
+                  : currentUnits * (price || holding?.last_known_price || 0)
 
                 return (
                   <div key={fund} className={fi > 0 ? 'mt-8' : ''}>
@@ -1043,14 +1102,18 @@ export default function PolicyPage() {
                             <td className="py-2 pr-3 text-right font-mono text-xs">{tx.price ? fmtNum(tx.price, 3) : '—'}</td>
                             <td className="py-2 pr-3 text-right font-mono text-xs">{tx.bal_units != null ? fmtNum(tx.bal_units, 2) : '—'}</td>
                             <td className="py-2 pr-3 text-right font-mono text-xs">
-                              <span className={tx.type === 'Switch Out' ? 'negative' : ''}>
-                                {tx.units_delta != null ? fmtNum(Math.abs(tx.units_delta), 2) : '—'}
-                              </span>
+                              {tx.units_delta != null ? (
+                                tx.type === 'Switch Out'
+                                  ? <span className="negative">-{fmtNum(Math.abs(tx.units_delta), 2)}</span>
+                                  : fmtNum(Math.abs(tx.units_delta), 2)
+                              ) : '—'}
                             </td>
                             <td className="py-2 pr-3 text-right font-mono text-xs">
-                              <span className={tx.type === 'Switch Out' ? 'negative' : ''}>
-                                {tx.value ? fmtMoney(Math.abs(parseFloat(tx.value))) : '—'}
-                              </span>
+                              {tx.value ? (
+                                tx.type === 'Switch Out'
+                                  ? <span className="negative">-{fmtMoney(Math.abs(parseFloat(tx.value)))}</span>
+                                  : fmtMoney(Math.abs(parseFloat(tx.value)))
+                              ) : '—'}
                             </td>
                             <td className="py-2">
                               <button onClick={() => deleteTransaction(tx.id)}
@@ -1063,18 +1126,16 @@ export default function PolicyPage() {
                       <tfoot>
                         <tr className="border-t border-gray-100">
                           <td colSpan={3} className="py-1 text-xs text-gray-400 uppercase tracking-wider">Total (before fees)</td>
-                          <td className="py-1 text-right font-mono text-xs">{fmtNum(currentUnits, 2)}</td>
+                          <td />
                           <td className="py-1 text-right font-mono text-xs">{fmtNum(totalBeforeUnits, 2)}</td>
                           <td className="py-1 text-right font-mono text-xs">{fmtMoney(totalBeforeValue)}</td>
                           <td />
                         </tr>
                         <tr>
                           <td colSpan={3} className="py-1 text-xs text-gray-400 uppercase tracking-wider">Total (after fees)</td>
+                          <td />
                           <td className="py-1 text-right font-mono text-xs">{fmtNum(currentUnits, 2)}</td>
-                          <td className="py-1 text-right font-mono text-xs">{fmtNum(currentUnits, 2)}</td>
-                          <td className="py-1 text-right font-mono text-xs">
-                            {fmtMoney(currentUnits * (price || holding?.last_known_price || 0))}
-                          </td>
+                          <td className="py-1 text-right font-mono text-xs">{fmtMoney(afterFeesValue)}</td>
                           <td />
                         </tr>
                       </tfoot>

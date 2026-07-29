@@ -81,6 +81,7 @@ export default function SmartTxForm({ policyId, transactions = [], onSaved, onCa
   const [reinvestPriceData,setReinvestPriceData]= useState(null)  // for reinvest: next-day price
 
   const [fetchingPrice, setFetchingPrice] = useState(false)
+  const [manualPrice,   setManualPrice]   = useState('')   // fallback if API price unavailable
 
   // ── price fetch logic ──
   const loadPriceSwitch = useCallback(async () => {
@@ -112,14 +113,14 @@ export default function SmartTxForm({ policyId, transactions = [], onSaved, onCa
     setFetchingPrice(false)
   }, [date, fund])
 
-  useEffect(() => { setPriceData(null); setExDivPriceData(null); setReinvestPriceData(null) }, [mode, date])
+  useEffect(() => { setPriceData(null); setExDivPriceData(null); setReinvestPriceData(null); setManualPrice('') }, [mode, date, toFund])
 
   useEffect(() => { if (mode === 'switch')   loadPriceSwitch()   }, [loadPriceSwitch,   mode])
   useEffect(() => { if (mode === 'reinvest') loadPriceReinvest() }, [loadPriceReinvest, mode])
   useEffect(() => { if (mode === 'premium' || mode === 'bonus') loadPricePremium() }, [loadPricePremium, mode])
 
   // ── derived calculations ──
-  const switchPrice   = priceData?.bidPrice
+  const switchPrice   = priceData?.bidPrice || (manualPrice ? parseFloat(manualPrice) : null)
   const switchUnits   = switchPrice && amount ? parseFloat(amount) / switchPrice : null
 
   // reinvest: either user-entered amount OR derived from rate% × NAV
@@ -299,10 +300,24 @@ export default function SmartTxForm({ policyId, transactions = [], onSaved, onCa
 
           {/* Price preview */}
           <PricePreview
-            loading={fetchingPrice} price={switchPrice}
+            loading={fetchingPrice} price={priceData?.bidPrice}
             units={switchUnits} amount={amount}
             label={`${toFund ? toFund.replace('GreatLink ', '') : 'To fund'} bid price`}
           />
+          {/* Manual price fallback when API fails */}
+          {!fetchingPrice && !priceData?.bidPrice && date && toFund && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, fontSize: 12 }}>
+              <span style={{ color: '#9ca3af' }}>Price not found — enter manually:</span>
+              <input type="number" step="0.0001" min="0" placeholder="e.g. 1.0230"
+                value={manualPrice} onChange={e => setManualPrice(e.target.value)}
+                style={{ width: 120, padding: '3px 8px', border: '1px solid #e5e7eb', borderRadius: 4, fontSize: 12 }} />
+              {manualPrice && amount && (
+                <span style={{ color: '#2d5016', fontWeight: 600 }}>
+                  → {(parseFloat(amount) / parseFloat(manualPrice)).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} units
+                </span>
+              )}
+            </div>
+          )}
         </div>
       )}
 
