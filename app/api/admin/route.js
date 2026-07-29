@@ -11,8 +11,13 @@ export async function POST(req) {
   const { action, payload } = await req.json()
 
   if (action === 'get_policy_id') {
-    const { data } = await supabase.from('policies').select('id,policy_number,invested,dividends').eq('policy_number', payload.policy_number).single()
-    return NextResponse.json(data)
+    const { data, error } = await supabase.from('policies').select('id,policy_number,invested,dividends').eq('policy_number', payload.policy_number).single()
+    return NextResponse.json({ data, error: error?.message, url: process.env.NEXT_PUBLIC_SUPABASE_URL?.substring(0,30), hasServiceKey: !!process.env.SUPABASE_SERVICE_KEY })
+  }
+
+  if (action === 'list_policies') {
+    const { data, error } = await supabase.from('policies').select('id,policy_number').limit(5)
+    return NextResponse.json({ data, error: error?.message })
   }
 
   if (action === 'get_transactions') {
