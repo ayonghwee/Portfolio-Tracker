@@ -2,13 +2,19 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
-const supabase = createClient(
-  'https://oeegjflkqfkxgtfzxbny.supabase.co',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9lZWdqZmxrcWZreGd0Znp4Ym55Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0NTkwMjA1MywiZXhwIjoyMDYxNDc4MDUzfQ.PkBNcELJCOLGNVMFMoBPrFZJIhv9nAYpL5q8FmNiMaM'
-)
-
 export async function POST(req) {
-  const { action, payload } = await req.json()
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://oeegjflkqfkxgtfzxbny.supabase.co',
+    process.env.SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9lZWdqZmxrcWZreGd0Znp4Ym55Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0NTkwMjA1MywiZXhwIjoyMDYxNDc4MDUzfQ.PkBNcELJCOLGNVMFMoBPrFZJIhv9nAYpL5q8FmNiMaM'
+  )
+
+  let body
+  try { body = await req.json() } catch(e) { return NextResponse.json({error:'bad json'},{status:400}) }
+  const { action, payload } = body
+
+  if (action === 'test') {
+    return NextResponse.json({ ok: true, url: process.env.NEXT_PUBLIC_SUPABASE_URL || 'hardcoded', hasServiceKey: !!process.env.SUPABASE_SERVICE_KEY })
+  }
 
   if (action === 'get_policy_id') {
     const { data, error } = await supabase.from('policies').select('id,policy_number,invested,dividends').eq('policy_number', payload.policy_number).single()
