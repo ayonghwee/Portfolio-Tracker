@@ -65,7 +65,7 @@ function computeBalanceUnits(transactions) {
   const result = {}
   Object.entries(byFund).forEach(([fund, txs]) => {
     let bal = 0
-    result[fund] = txs.map(tx => {
+    result[fund] = txs.filter(tx => tx.type !== 'Dividend').map(tx => {
       const u = Math.abs(parseFloat(tx.units) || 0)
       const delta = ['Switch Out', 'Welcome Bonus Clawback'].includes(tx.type) ? -u : u
       bal = Math.max(0, bal + delta)
@@ -575,6 +575,7 @@ export default function PolicyPage() {
     .filter(t => ['Reinvest','Dividend'].includes(t.type) && t.value)
     .sort((a, b) => new Date(b.date) - new Date(a.date))
   const totalDividends = dividendTxs.reduce((s, t) => s + Math.abs(parseFloat(t.value) || 0), 0)
+  const cashDividendTotal = dividendTxs.filter(t => t.type === 'Dividend').reduce((s, t) => s + Math.abs(parseFloat(t.value) || 0), 0)
 
   // per-fund grouped transactions with BAL UNITS
   const fundTimeline = computeBalanceUnits(transactions)
@@ -871,7 +872,7 @@ export default function PolicyPage() {
                           )}
                         </td>
                         <td className="py-3 pr-3 text-right font-mono text-xs">{fmtMoney(value)}</td>
-                        <td className="py-3 pr-3 text-right font-mono text-xs">
+                        <td className={`py-3 pr-3 text-right font-mono text-xs ${ret == null ? '' : ret >= 0 ? 'positive' : 'negative'}`}>
                           {avgPrice ? fmtNum(avgPrice, 3) : '—'}
                         </td>
                         <td className={`py-3 pr-3 text-right text-xs ${ret == null ? 'neutral' : ret >= 0 ? 'positive' : 'negative'}`}>
@@ -968,8 +969,14 @@ export default function PolicyPage() {
               </thead>
               <tbody>
                 {dividendTxs.map(t => {
-                  const rate       = t.dividend_rate != null ? parseFloat(t.dividend_rate) : null
-                  const annualised = rate != null ? (rate * 12).toFixed(3) : null
+                  // Dividend type: price=per-unit rate, dividend_rate=annualised (already stored as such)
+                  // Reinvest type: dividend_rate=per-unit rate (if stored), else null
+                  const rate = t.type === 'Dividend'
+                    ? (t.price != null ? parseFloat(t.price) : null)
+                    : (t.dividend_rate != null ? parseFloat(t.dividend_rate) : null)
+                  const annualised = t.type === 'Dividend'
+                    ? (t.dividend_rate != null ? parseFloat(t.dividend_rate).toFixed(3) : null)
+                    : (rate != null ? (rate * 12).toFixed(3) : null)
                   const amount     = t.value ? Math.abs(parseFloat(t.value)) : null
                   const method     = t.type === 'Reinvest' ? 'Reinvest' : (t.payment_method || 'Cash')
                   return (
@@ -998,7 +1005,7 @@ export default function PolicyPage() {
               <tfoot>
                 <tr className="border-t border-gray-200">
                   <td colSpan={6} className="py-2 text-xs text-gray-400 uppercase tracking-wider">Total Dividend Amount</td>
-                  <td className="py-2 text-right font-mono text-xs font-medium">{fmtMoney(totalDividends)}</td>
+                  <td className="py-2 text-right font-mono text-xs font-medium">{fmtMoney(cashDividendTotal)}</td>
                 </tr>
               </tfoot>
             </table>
@@ -1051,11 +1058,8 @@ export default function PolicyPage() {
                   const v = Math.abs(parseFloat(t.value) || 0)
                   return s + (['Switch Out', 'Welcome Bonus Clawback'].includes(t.type) ? -v : v)
                 }, 0)
-                // "after fees" value = current units × avg cost (= before value / before units)
-                const avgCost = Math.abs(totalBeforeUnits) > 0.001 ? totalBeforeValue / totalBeforeUnits : null
-                const afterFeesValue = avgCost != null
-                  ? currentUnits * avgCost
-                  : currentUnits * (price || holding?.last_known_price || 0)
+                // "after fees" value = current units × current market price (matches Meow)
+                const afterFeesValue = currentUnits * (price || holding?.last_known_price || 0)
 
                 return (
                   <div key={fund} className={fi > 0 ? 'mt-8' : ''}>

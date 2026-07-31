@@ -76,22 +76,28 @@ export default function SmartTxForm({ policyId, transactions = [], onSaved, onCa
   const [error,      setError]      = useState('')
 
   // price preview state
-  const [priceData,        setPriceData]        = useState(null)  // for switch / premium
+  const [priceData,        setPriceData]        = useState(null)  // toFund price (switch) / premium
+  const [fromPriceData,    setFromPriceData]    = useState(null)  // fromFund price (switch only)
   const [exDivPriceData,   setExDivPriceData]   = useState(null)  // for reinvest: price at ex-div date
   const [reinvestPriceData,setReinvestPriceData]= useState(null)  // for reinvest: next-day price
 
-  const [fetchingPrice, setFetchingPrice] = useState(false)
-  const [manualPrice,   setManualPrice]   = useState('')   // fallback if API price unavailable
+  const [fetchingPrice,    setFetchingPrice]    = useState(false)
+  const [manualPrice,      setManualPrice]      = useState('')  // fallback for toFund / premium
+  const [manualFromPrice,  setManualFromPrice]  = useState('')  // fallback for fromFund (switch)
 
   // ── price fetch logic ──
   const loadPriceSwitch = useCallback(async () => {
-    if (!date || !toFund) return
+    if (!date || !toFund || !fromFund) return
     setFetchingPrice(true)
     const offset = timeOfDay === 'after' ? 1 : 0
-    const data = await fetchPrice(toFund, date, offset)
-    setPriceData(data)
+    const [fromData, toData] = await Promise.all([
+      fetchPrice(fromFund, date, offset),
+      fetchPrice(toFund,   date, offset),
+    ])
+    setFromPriceData(fromData)
+    setPriceData(toData)
     setFetchingPrice(false)
-  }, [date, toFund, timeOfDay])
+  }, [date, fromFund, toFund, timeOfDay])
 
   const loadPriceReinvest = useCallback(async () => {
     if (!date || !fund) return
@@ -113,15 +119,20 @@ export default function SmartTxForm({ policyId, transactions = [], onSaved, onCa
     setFetchingPrice(false)
   }, [date, fund])
 
-  useEffect(() => { setPriceData(null); setExDivPriceData(null); setReinvestPriceData(null); setManualPrice('') }, [mode, date, toFund])
+  useEffect(() => { setPriceData(null); setFromPriceData(null); setExDivPriceData(null); setReinvestPriceData(null); setManualPrice(''); setManualFromPrice('') }, [mode, date, fromFund, toFund])
 
   useEffect(() => { if (mode === 'switch')   loadPriceSwitch()   }, [loadPriceSwitch,   mode])
   useEffect(() => { if (mode === 'reinvest') loadPriceReinvest() }, [loadPriceReinvest, mode])
   useEffect(() => { if (mode === 'premium' || mode === 'bonus') loadPricePremium() }, [loadPricePremium, mode])
 
   // ── derived calculations ──
-  const switchPrice   = priceData?.bidPrice || (manualPrice ? parseFloat(manualPrice) : null)
-  const switchUnits   = switchPrice && amount ? parseFloat(amount) / switchPrice : null
+  // Switch uses separate prices: fromFund price for Switch Out, toFund price for Switch In
+  const fromSwitchPrice = fromPriceData?.bidPrice || (manualFromPrice ? parseFloat(manualFromPrice) : null)
+  const toSwitchPrice   = priceData?.bidPrice     || (manualPrice     ? parseFloat(manualPrice)     : null)
+  const fromSwitchUnits = fromSwitchPrice && amount ? parseFloat(amount) / fromSwitchPrice : null
+  const toSwitchUnits   = toSwitchPrice   && amount ? parseFloat(amount) / toSwitchPrice   : null
+  // legacy alias kept for PricePreview below
+  const switchPrice = toSwitchPrice
 
   // reinvest: either user-entered amount OR derived from rate% × NAV
   const currentUnits  = fund ? balanceUnitsFor(fund, transactions) : 0
@@ -155,13 +166,18 @@ export default function SmartTxForm({ policyId, transactions = [], onSaved, onCa
     setSaving(true)
     try {
       if (mode === 'switch') {
-        if (!date || !fromFund || !toFund || !amount || !switchPrice)
-          throw new Error('Please fill all fields and wait for price to load.')
+        if (!date || !fromFund || !toFund || !amount)
+          throw new Error('Please fill in date, both funds, and amount.')
         if (fromFund === toFund)
           throw new Error('Switch From and To fund cannot be the same.')
+        if (!fromSwitchPrice)
+          throw new Error(`No price for "${fromFund.replace('GreatLink ', '')}". Enter it manually above.`)
+        if (!toSwitchPrice)
+          throw new Error(`No price for "${toFund.replace('GreatLink ', '')}". Enter it manually above.`)
 
         const pairId = crypto.randomUUID()
-        const units  = parseFloat(amount) / switchPrice
+        const fromUnits = parseFloat(amount) / fromSwitchPrice
+        const toUnits   = parseFloat(amount) / toSwitchPrice
         const effectiveDate = timeOfDay === 'after' ? addBusinessDays(date, 1) : date
 
         // Compute running balances
@@ -171,15 +187,15 @@ export default function SmartTxForm({ policyId, transactions = [], onSaved, onCa
         const rows = [
           {
             policy_id: policyId, date, type: 'Switch Out',
-            fund_name: fromFund, price: switchPrice, units: -units,
-            value: -parseFloat(amount), bal_units: Math.max(0, fromBal - units),
+            fund_name: fromFund, price: fromSwitchPrice, units: -fromUnits,
+            value: -parseFloat(amount), bal_units: Math.max(0, fromBal - fromUnits),
             price_effective_date: effectiveDate, time_of_day: timeOfDay,
             pair_id: pairId,
           },
           {
             policy_id: policyId, date, type: 'Switch In',
-            fund_name: toFund, price: switchPrice, units,
-            value: parseFloat(amount), bal_units: toBal + units,
+            fund_name: toFund, price: toSwitchPrice, units: toUnits,
+            value: parseFloat(amount), bal_units: toBal + toUnits,
             price_effective_date: effectiveDate, time_of_day: timeOfDay,
             pair_id: pairId,
           },
@@ -298,24 +314,54 @@ export default function SmartTxForm({ policyId, transactions = [], onSaved, onCa
             </div>
           )}
 
-          {/* Price preview */}
-          <PricePreview
-            loading={fetchingPrice} price={priceData?.bidPrice}
-            units={switchUnits} amount={amount}
-            label={`${toFund ? toFund.replace('GreatLink ', '') : 'To fund'} bid price`}
-          />
-          {/* Manual price fallback when API fails */}
-          {!fetchingPrice && !priceData?.bidPrice && date && toFund && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, fontSize: 12 }}>
-              <span style={{ color: '#9ca3af' }}>Price not found — enter manually:</span>
-              <input type="number" step="0.0001" min="0" placeholder="e.g. 1.0230"
-                value={manualPrice} onChange={e => setManualPrice(e.target.value)}
-                style={{ width: 120, padding: '3px 8px', border: '1px solid #e5e7eb', borderRadius: 4, fontSize: 12 }} />
-              {manualPrice && amount && (
-                <span style={{ color: '#2d5016', fontWeight: 600 }}>
-                  → {(parseFloat(amount) / parseFloat(manualPrice)).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} units
-                </span>
-              )}
+          {/* Price previews — from fund (Switch Out) and to fund (Switch In) */}
+          {fetchingPrice && <div className="text-xs text-gray-400 mb-2">Fetching prices…</div>}
+          {!fetchingPrice && fromFund && toFund && date && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+              {/* From fund price */}
+              <div>
+                <div className="text-xs text-gray-400 mb-1">{fromFund.replace('GreatLink ', '')} (Switch Out)</div>
+                {fromPriceData?.bidPrice ? (
+                  <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 4, padding: '6px 10px', fontSize: 12, display: 'flex', gap: 12 }}>
+                    <span style={{ color: '#6b7280' }}>Bid:</span>
+                    <strong>{fmt(fromPriceData.bidPrice, 4)}</strong>
+                    {amount && fromSwitchUnits && <><span style={{ color: '#6b7280' }}>→</span><strong style={{ color: '#7c2d12' }}>{fmt(fromSwitchUnits)} units</strong></>}
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                    <input type="number" step="0.0001" min="0" placeholder="Enter price"
+                      value={manualFromPrice} onChange={e => setManualFromPrice(e.target.value)}
+                      style={{ width: 110, padding: '3px 8px', border: '1px solid #fca5a5', borderRadius: 4, fontSize: 12 }} />
+                    {manualFromPrice && amount && (
+                      <span style={{ color: '#7c2d12', fontWeight: 600 }}>
+                        → {fmt(parseFloat(amount) / parseFloat(manualFromPrice))} units
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+              {/* To fund price */}
+              <div>
+                <div className="text-xs text-gray-400 mb-1">{toFund.replace('GreatLink ', '')} (Switch In)</div>
+                {priceData?.bidPrice ? (
+                  <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 4, padding: '6px 10px', fontSize: 12, display: 'flex', gap: 12 }}>
+                    <span style={{ color: '#6b7280' }}>Bid:</span>
+                    <strong>{fmt(priceData.bidPrice, 4)}</strong>
+                    {amount && toSwitchUnits && <><span style={{ color: '#6b7280' }}>→</span><strong style={{ color: '#2d5016' }}>{fmt(toSwitchUnits)} units</strong></>}
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                    <input type="number" step="0.0001" min="0" placeholder="Enter price"
+                      value={manualPrice} onChange={e => setManualPrice(e.target.value)}
+                      style={{ width: 110, padding: '3px 8px', border: '1px solid #fca5a5', borderRadius: 4, fontSize: 12 }} />
+                    {manualPrice && amount && (
+                      <span style={{ color: '#2d5016', fontWeight: 600 }}>
+                        → {fmt(parseFloat(amount) / parseFloat(manualPrice))} units
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
