@@ -1,5 +1,6 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
@@ -61,6 +62,7 @@ export default function LedgerPage() {
   const [tooltip, setTooltip] = useState(null)
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 })
   const [openMenu, setOpenMenu] = useState(null)
+  const [menuPos, setMenuPos] = useState({ top: 0, right: 0 })
   const [editingPolicy, setEditingPolicy] = useState(null)
   const [editForm, setEditForm] = useState({})
   const [deleting, setDeleting] = useState(null)
@@ -375,9 +377,15 @@ export default function LedgerPage() {
                   <td className="py-3 pr-4 text-right font-mono text-xs neutral">{p.dividends ? fmtMoney(p.dividends) : '—'}</td>
                   <td className={`py-3 pr-4 text-right text-xs ${p.roi >= 0 ? 'positive' : p.roi < 0 ? 'negative' : ''}`}>{p.roi != null ? `${p.roi >= 0 ? '↑' : '↓'} ${Math.abs(p.roi).toFixed(2)}%` : '—'}</td>
                   <td className={`py-3 pr-4 text-right text-xs ${p.xirr >= 0 ? 'positive' : p.xirr < 0 ? 'negative' : ''}`}>{p.xirr != null ? `${p.xirr.toFixed(2)}%` : '—'}</td>
-                  <td className="py-3 relative">
+                  <td className="py-3">
                     <button
-                      onClick={e => { e.stopPropagation(); setOpenMenu(openMenu === p.id ? null : p.id) }}
+                      onClick={e => {
+                        e.stopPropagation()
+                        if (openMenu === p.id) { setOpenMenu(null); return }
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+                        setOpenMenu(p.id)
+                      }}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0,
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                         width: 28, height: 28, borderRadius: 6, color: '#b0aca8',
@@ -388,9 +396,9 @@ export default function LedgerPage() {
                         <path d="M3.625 7.5a.875.875 0 1 1-1.75 0 .875.875 0 0 1 1.75 0Zm4.25 0a.875.875 0 1 1-1.75 0 .875.875 0 0 1 1.75 0ZM12.125 7.5a.875.875 0 1 1-1.75 0 .875.875 0 0 1 1.75 0Z" fill="currentColor" fillRule="evenodd" clipRule="evenodd"/>
                       </svg>
                     </button>
-                    {openMenu === p.id && (
+                    {openMenu === p.id && typeof document !== 'undefined' && createPortal(
                       <div onClick={e => e.stopPropagation()} style={{
-                        position: 'absolute', right: 4, top: 'calc(100% + 4px)', zIndex: 50,
+                        position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999,
                         background: 'white', borderRadius: 8, padding: '4px',
                         boxShadow: '0 4px 24px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06)',
                         minWidth: 130, border: '1px solid rgba(0,0,0,0.06)'
@@ -414,7 +422,8 @@ export default function LedgerPage() {
                           <svg width="13" height="13" viewBox="0 0 15 15" fill="none"><path d="M5.5 1a.5.5 0 0 0 0 1h4a.5.5 0 0 0 0-1h-4ZM3 3.5a.5.5 0 0 1 .5-.5h8a.5.5 0 0 1 0 1H11v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4H3.5a.5.5 0 0 1-.5-.5ZM5 4v8h5V4H5Z" fill="currentColor" fillRule="evenodd" clipRule="evenodd"/></svg>
                           {deleting === p.id ? 'Deleting…' : 'Delete'}
                         </button>
-                      </div>
+                      </div>,
+                      document.body
                     )}
                   </td>
                 </tr>
