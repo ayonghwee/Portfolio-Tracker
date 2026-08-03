@@ -137,14 +137,8 @@ function PerformanceChart({ commenced, invested, aum, transactions }) {
   while (md <= now) { months.push(new Date(md)); md.setMonth(md.getMonth() + 1) }
   if (months.length < 2) return null
 
-  const premTxs = transactions
-    .filter(t => t.type === 'Net Investment Premium' && t.value)
-    .sort((a, b) => new Date(a.date) - new Date(b.date))
-
-  const tiaPoints = months.map(m => {
-    const cum = premTxs.filter(t => new Date(t.date) <= m).reduce((s, t) => s + Math.abs(parseFloat(t.value) || 0), 0)
-    return cum || (invested || 0)
-  })
+  // TIA: flat line at invested amount (matches Meow behaviour)
+  const tiaPoints = months.map(() => invested || 0)
 
   const totalMs = Math.max(now - start, 1)
   const tivPoints = months.map(m => {
@@ -850,7 +844,7 @@ export default function PolicyPage() {
                     const avgPrice   = avgFromTx || h.avg_price
                     const ret        = avgPrice && price ? ((price - avgPrice) / avgPrice) * 100 : null
                     const netInflow  = calcNetInflow(transactions, h.fund_name)
-                    const pnl        = netInflow > 0 ? value - netInflow : null
+                    const pnl        = value - netInflow
                     const apportion  = totalDonut > 0 ? (value / totalDonut) * 100 : 0
                     return (
                       <tr key={h.id} className="table-row">
@@ -881,8 +875,8 @@ export default function PolicyPage() {
                         <td className="py-3 pr-3 text-right font-mono text-xs">
                           {netInflow > 0 ? fmtMoney(netInflow) : <span className="neutral">0.00</span>}
                         </td>
-                        <td className={`py-3 pr-3 text-right font-mono text-xs ${pnl == null ? 'neutral' : pnl >= 0 ? 'positive' : 'negative'}`}>
-                          {pnl != null ? `${fmtMoney(pnl)} (${((pnl / netInflow) * 100).toFixed(2)}%)` : 'N/A'}
+                        <td className={`py-3 pr-3 text-right font-mono text-xs ${pnl >= 0 ? 'positive' : 'negative'}`}>
+                          {`${fmtMoney(pnl)} (${netInflow > 0 ? ((pnl / netInflow) * 100).toFixed(2) + '%' : 'N/A'})`}
                         </td>
                         <td className="py-3 text-right font-mono text-xs">{apportion.toFixed(2)}</td>
                       </tr>

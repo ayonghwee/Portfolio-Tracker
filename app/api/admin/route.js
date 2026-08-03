@@ -2,51 +2,53 @@
 import { NextResponse } from 'next/server'
 
 const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://oeegjflkqfkxgtfzxbny.supabase.co'
-const SERVICE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9lZWdqZmxrcWZreGd0Znp4Ym55Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0NTkwMjA1MywiZXhwIjoyMDYxNDc4MDUzfQ.PkBNcELJCOLGNVMFMoBPrFZJIhv9nAYpL5q8FmNiMaM'
 const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-// Low-level REST helper — avoids supabase-js client initialization issues
-async function supa(method, table, opts = {}) {
-  const { filter, body, select = '*', limit } = opts
-  let url = `${SUPA_URL}/rest/v1/${table}`
-  const params = new URLSearchParams()
-  if (select) params.set('select', select)
-  if (limit) params.set('limit', String(limit))
-  if (filter) Object.entries(filter).forEach(([k, v]) => params.set(k, `eq.${v}`))
-  if (params.toString()) url += '?' + params.toString()
-
-  const headers = {
-    'apikey': SERVICE_KEY,
-    'Authorization': `Bearer ${SERVICE_KEY}`,
-    'Content-Type': 'application/json',
-    'Prefer': method === 'POST' ? 'return=minimal' : 'return=representation',
+// Low-level REST helper — uses caller-supplied token (user session or service key)
+function makeSupa(token) {
+  const key = token || ANON_KEY
+  async function supa(method, table, opts = {}) {
+    const { filter, body, select = '*', limit } = opts
+    let url = `${SUPA_URL}/rest/v1/${table}`
+    const params = new URLSearchParams()
+    if (select) params.set('select', select)
+    if (limit) params.set('limit', String(limit))
+    if (filter) Object.entries(filter).forEach(([k, v]) => params.set(k, `eq.${v}`))
+    if (params.toString()) url += '?' + params.toString()
+    const headers = {
+      'apikey': ANON_KEY,
+      'Authorization': `Bearer ${key}`,
+      'Content-Type': 'application/json',
+      'Prefer': method === 'POST' ? 'return=minimal' : 'return=representation',
+    }
+    const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined })
+    const text = await res.text()
+    try { return { ok: res.ok, status: res.status, data: JSON.parse(text) } }
+    catch { return { ok: res.ok, status: res.status, data: text } }
   }
-  const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined })
-  const text = await res.text()
-  try { return { ok: res.ok, status: res.status, data: JSON.parse(text) } }
-  catch { return { ok: res.ok, status: res.status, data: text } }
-}
-
-async function supaDelete(table, filter) {
-  let url = `${SUPA_URL}/rest/v1/${table}`
-  const params = new URLSearchParams()
-  if (filter.in) {
-    params.set(filter.in.col, `in.(${filter.in.vals.join(',')})`)
-  } else if (filter.eq) {
-    Object.entries(filter.eq).forEach(([k, v]) => params.set(k, `eq.${v}`))
+  async function supaDelete(table, filter) {
+    let url = `${SUPA_URL}/rest/v1/${table}`
+    const params = new URLSearchParams()
+    if (filter.in) {
+      params.set(filter.in.col, `in.(${filter.in.vals.join(',')})`)
+    } else if (filter.eq) {
+      Object.entries(filter.eq).forEach(([k, v]) => params.set(k, `eq.${v}`))
+    }
+    url += '?' + params.toString()
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' }
+    })
+    return { ok: res.ok, status: res.status }
   }
-  url += '?' + params.toString()
-  const res = await fetch(url, {
-    method: 'DELETE',
-    headers: { 'apikey': SERVICE_KEY, 'Authorization': `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' }
-  })
-  return { ok: res.ok, status: res.status }
+  return { supa, supaDelete }
 }
 
 export async function POST(req) {
   let body
   try { body = await req.json() } catch(e) { return NextResponse.json({ error: 'bad json' }, { status: 400 }) }
-  const { action, payload } = body
+  const { action, payload, access_token } = body
+  const { supa, supaDelete } = makeSupa(access_token)
 
   if (action === 'test') {
     // Verify connectivity
@@ -88,9 +90,10 @@ export async function POST(req) {
   }
 
   if (action === 'update_policy') {
+    const key = access_token || ANON_KEY
     const r = await fetch(
       `${SUPA_URL}/rest/v1/policies?id=eq.${payload.id}`,
-      { method: 'PATCH', headers: { 'apikey': SERVICE_KEY, 'Authorization': `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }, body: JSON.stringify(payload.fields) }
+      { method: 'PATCH', headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }, body: JSON.stringify(payload.fields) }
     )
     return NextResponse.json({ ok: r.ok, status: r.status })
   }
