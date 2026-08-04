@@ -349,6 +349,8 @@ export default function PolicyPage() {
   const [deleting, setDeleting]       = useState(false)
   const [priceStatus, setPriceStatus] = useState('')
   const [showAddTx, setShowAddTx]     = useState(false)
+  const [deleteModeDiv, setDeleteModeDiv] = useState(false)
+  const [deleteModeTx, setDeleteModeTx]   = useState(false)
   const [newTx, setNewTx]             = useState({ date: '', type: 'Reinvest', fund_name: '', price: '', units: '', value: '' })
   const [savingTx, setSavingTx]       = useState(false)
   const [timelineYear, setTimelineYear] = useState(new Date().getFullYear())
@@ -644,7 +646,7 @@ export default function PolicyPage() {
         <div className="grid grid-cols-2 gap-10 mb-10">
 
           {/* II. Profile */}
-          <div>
+          <div id="section-ii">
             <div className="flex items-center justify-between mb-3">
               <div className="section-header"><span className="roman-sm">II.</span><span className="section-title">PROFILE</span></div>
               <button onClick={() => { setEditingPolicy(!editingPolicy); setEditPolicy(policy) }}
@@ -711,7 +713,12 @@ export default function PolicyPage() {
 
           {/* III. Allocation */}
           <div>
-            <div className="section-header mb-2"><span className="roman-sm">III.</span><span className="section-title">ALLOCATION</span></div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="section-header"><span className="roman-sm">III.</span><span className="section-title">ALLOCATION</span></div>
+              <button onClick={() => { setEditMode(true); setEditHoldings(holdings); document.getElementById('section-v')?.scrollIntoView({ behavior: 'smooth' }) }}
+                className="text-xs text-gray-400 hover:text-gray-700 underline"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Edit holdings</button>
+            </div>
             <div className="text-xs text-gray-400 mb-4">Current portfolio distribution by fund</div>
             {donutData.length > 0 ? (
               <div className="flex flex-col items-center">
@@ -741,7 +748,12 @@ export default function PolicyPage() {
 
         {/* ── IV. Performance over time ── */}
         <div className="mb-10">
-          <div className="section-header mb-2"><span className="roman-sm">IV.</span><span className="section-title">PERFORMANCE OVER TIME</span></div>
+          <div className="flex items-center justify-between mb-2">
+            <div className="section-header"><span className="roman-sm">IV.</span><span className="section-title">PERFORMANCE OVER TIME</span></div>
+            <button onClick={() => { setEditingPolicy(true); setEditPolicy(policy); document.getElementById('section-ii')?.scrollIntoView({ behavior: 'smooth' }) }}
+              className="text-xs text-gray-400 hover:text-gray-700 underline"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Edit</button>
+          </div>
           <div className="text-xs text-gray-400 mb-4">TIV vs TIA monthly trajectory</div>
           <PerformanceChart
             commenced={policy.commenced}
@@ -752,7 +764,7 @@ export default function PolicyPage() {
         </div>
 
         {/* ── V. Portfolio summary ── */}
-        <div className="mb-10">
+        <div className="mb-10" id="section-v">
           <div className="flex items-center justify-between mb-1">
             <div className="section-header"><span className="roman-sm">V.</span><span className="section-title">PORTFOLIO SUMMARY</span></div>
             <div className="flex items-center gap-3">
@@ -937,9 +949,16 @@ export default function PolicyPage() {
         <div className="mb-10">
           <div className="flex items-center justify-between mb-1">
             <div className="section-header"><span className="roman-sm">VII.</span><span className="section-title">DIVIDENDS</span></div>
-            <button onClick={() => { setShowAddTx(true); setTimeout(() => document.getElementById('add-tx-form')?.scrollIntoView({behavior:'smooth'}), 50) }}
-              className="text-xs text-gray-400 hover:text-gray-700 underline"
-              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>+ Add dividend</button>
+            <div className="flex items-center gap-3">
+              <button onClick={() => setDeleteModeDiv(v => !v)}
+                className="text-xs underline"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: deleteModeDiv ? '#e53e3e' : '#9ca3af' }}>
+                {deleteModeDiv ? 'Done' : 'Delete'}
+              </button>
+              <button onClick={() => { setShowAddTx(true); setTimeout(() => document.getElementById('add-tx-form')?.scrollIntoView({behavior:'smooth'}), 50) }}
+                className="text-xs text-gray-400 hover:text-gray-700 underline"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>+ Add dividend</button>
+            </div>
           </div>
           <div className="text-xs text-gray-400 mb-4">Distributions received from underlying funds</div>
           {dividendTxs.length === 0 ? (
@@ -956,7 +975,7 @@ export default function PolicyPage() {
                     { label: 'DATE',       align: 'center' },
                     { label: 'METHOD',     align: 'center' },
                     { label: 'AMOUNT',     align: 'right'  },
-                    { label: '',           align: 'center' },
+                    ...(deleteModeDiv ? [{ label: '', align: 'center' }] : []),
                   ].map(({ label, align }) => (
                     <th key={label} className="py-2 pr-3 text-xs tracking-widest text-gray-400 font-normal" style={{ textAlign: align }}>{label}</th>
                   ))}
@@ -993,18 +1012,20 @@ export default function PolicyPage() {
                       <td className="py-2 text-right font-mono font-medium text-xs">
                         {amount != null ? fmtMoney(amount) : '—'}
                       </td>
-                      <td className="py-2">
-                        <button onClick={() => deleteTransaction(t.id)}
-                          className="text-gray-200 hover:text-red-400 text-xs"
-                          style={{ background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
-                      </td>
+                      {deleteModeDiv && (
+                        <td className="py-2">
+                          <button onClick={() => deleteTransaction(t.id)}
+                            className="text-red-400 hover:text-red-600 text-xs"
+                            style={{ background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
+                        </td>
+                      )}
                     </tr>
                   )
                 })}
               </tbody>
               <tfoot>
                 <tr className="border-t border-gray-200">
-                  <td colSpan={7} className="py-2 text-xs text-gray-400 uppercase tracking-wider">Total Dividend Amount</td>
+                  <td colSpan={deleteModeDiv ? 7 : 6} className="py-2 text-xs text-gray-400 uppercase tracking-wider">Total Dividend Amount</td>
                   <td className="py-2 text-right font-mono text-xs font-medium">{fmtMoney(cashDividendTotal)}</td>
                 </tr>
               </tfoot>
@@ -1016,11 +1037,18 @@ export default function PolicyPage() {
         <div>
           <div className="flex items-center justify-between mb-1">
             <div className="section-header"><span className="roman-sm">VIII.</span><span className="section-title">TRANSACTIONS</span></div>
-            <button onClick={() => showAddTx ? setShowAddTx(false) : openAddTx('Net Investment Premium')}
-              className="text-xs text-gray-400 hover:text-gray-700 underline"
-              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-              {showAddTx ? 'Cancel' : '+ Add transaction'}
-            </button>
+            <div className="flex items-center gap-3">
+              <button onClick={() => setDeleteModeTx(v => !v)}
+                className="text-xs underline"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: deleteModeTx ? '#e53e3e' : '#9ca3af' }}>
+                {deleteModeTx ? 'Done' : 'Delete'}
+              </button>
+              <button onClick={() => showAddTx ? setShowAddTx(false) : openAddTx('Net Investment Premium')}
+                className="text-xs text-gray-400 hover:text-gray-700 underline"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                {showAddTx ? 'Cancel' : '+ Add transaction'}
+              </button>
+            </div>
           </div>
           <div className="text-xs text-gray-400 mb-4">Per-fund transaction ledger</div>
 
@@ -1088,7 +1116,7 @@ export default function PolicyPage() {
                             { label: 'BAL UNITS',   align: 'right'  },
                             { label: 'UNITS',       align: 'right'  },
                             { label: 'VALUE',       align: 'right'  },
-                            { label: '',            align: 'center' },
+                            ...(deleteModeTx ? [{ label: '', align: 'center' }] : []),
                           ].map(({ label, align }, i) => (
                             <th key={i} className="py-1.5 pr-3 text-xs tracking-widest text-gray-400 font-normal" style={{ textAlign: align }}>{label}</th>
                           ))}
@@ -1119,11 +1147,13 @@ export default function PolicyPage() {
                                   : fmtMoney(Math.abs(parseFloat(tx.value)))
                               ) : '—'}
                             </td>
+                            {deleteModeTx && (
                             <td className="py-2">
                               <button onClick={() => deleteTransaction(tx.id)}
-                                className="text-gray-200 hover:text-red-400 text-xs"
+                                className="text-red-400 hover:text-red-600 text-xs"
                                 style={{ background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
                             </td>
+                            )}
                           </tr>
                         ))}
                       </tbody>
