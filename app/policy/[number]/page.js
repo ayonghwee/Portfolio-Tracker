@@ -956,6 +956,7 @@ export default function PolicyPage() {
                     { label: 'DATE',       align: 'center' },
                     { label: 'METHOD',     align: 'center' },
                     { label: 'AMOUNT',     align: 'right'  },
+                    { label: '',           align: 'center' },
                   ].map(({ label, align }) => (
                     <th key={label} className="py-2 pr-3 text-xs tracking-widest text-gray-400 font-normal" style={{ textAlign: align }}>{label}</th>
                   ))}
@@ -992,13 +993,18 @@ export default function PolicyPage() {
                       <td className="py-2 text-right font-mono font-medium text-xs">
                         {amount != null ? fmtMoney(amount) : '—'}
                       </td>
+                      <td className="py-2">
+                        <button onClick={() => deleteTransaction(t.id)}
+                          className="text-gray-200 hover:text-red-400 text-xs"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
+                      </td>
                     </tr>
                   )
                 })}
               </tbody>
               <tfoot>
                 <tr className="border-t border-gray-200">
-                  <td colSpan={6} className="py-2 text-xs text-gray-400 uppercase tracking-wider">Total Dividend Amount</td>
+                  <td colSpan={7} className="py-2 text-xs text-gray-400 uppercase tracking-wider">Total Dividend Amount</td>
                   <td className="py-2 text-right font-mono text-xs font-medium">{fmtMoney(cashDividendTotal)}</td>
                 </tr>
               </tfoot>
