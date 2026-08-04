@@ -173,19 +173,21 @@ export async function POST(req) {
       if (u < 0.0001) continue
       if (existingKeys.has(`${runDate}|${fund}`)) continue  // already stored
 
-      // month-end price → fee in $; run-date price → convert $ to units deducted
-      const [p1, p2] = await Promise.all([getPrice(fund, monthEnd), getPrice(fund, runDate)])
-      if (!p1 || !p2) continue
+      // Query GE using the RUN DATE — GE's 1-day lag means it returns the
+      // price effective on month-end (D-1 of run date). This matches FPMS exactly:
+      // same price is used for both fee calculation and unit conversion.
+      const p = await getPrice(fund, runDate)
+      if (!p) continue
 
-      const feeVal   = parseFloat((u * p1 * FEE_RATE).toFixed(2))
-      const feeUnits = parseFloat((feeVal / p2).toFixed(6))
+      const feeVal   = parseFloat((u * p * FEE_RATE).toFixed(2))
+      const feeUnits = parseFloat((feeVal / p).toFixed(6))
 
       toInsert.push({
         policy_id,
         date:      runDate,
         fund_name: fund,
         type:      'Policy Fee',
-        price:     p2,
+        price:     p,
         units:     feeUnits,
         value:     feeVal,
         auto_computed: true,
