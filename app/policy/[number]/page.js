@@ -380,6 +380,74 @@ export default function PolicyPage() {
   const [savingTx, setSavingTx]       = useState(false)
   const [timelineYear, setTimelineYear] = useState(new Date().getFullYear())
 
+  // ── Batch entry (Section VIII) ──────────────────────────────────────────────
+  const EMPTY_ROW = () => ({ date: '', fund_name: '', type: 'Net Investment Premium', price: '', units: '', value: '' })
+  const [showBatch, setShowBatch]     = useState(false)
+  const [batchRows, setBatchRows]     = useState(() => Array(5).fill(null).map(EMPTY_ROW))
+  const [savingBatch, setSavingBatch] = useState(false)
+
+  async function updateBatchRow(i, field, value) {
+    setBatchRows(rows => rows.map((r, idx) => {
+      if (idx !== i) return r
+      const u = { ...r, [field]: value }
+      if ((field === 'value' || field === 'price') && u.price && u.value) {
+        const p = parseFloat(u.price), v = parseFloat(u.value)
+        if (p && v) u.units = (v / p).toFixed(6)
+      }
+      return u
+    }))
+    // Auto-fetch D-1 price when date or fund changes
+    if (field === 'date' || field === 'fund_name') {
+      const current = batchRows[i]
+      const date2   = field === 'date'      ? value : current.date
+      const fund2   = field === 'fund_name' ? value : current.fund_name
+      if (date2 && fund2) {
+        const code = FUND_CODE_MAP[fund2]
+        if (code) {
+          try {
+            const res = await fetch(`/api/prices/historical?fundcode=${encodeURIComponent(code)}&date=${date2}&offset=-1`)
+            if (res.ok) {
+              const data = await res.json()
+              if (data.bidPrice) {
+                setBatchRows(rows => rows.map((r, idx) => {
+                  if (idx !== i) return r
+                  const price = String(data.bidPrice)
+                  const units = r.value ? (parseFloat(r.value) / data.bidPrice).toFixed(6) : r.units
+                  return { ...r, price, units: units || '' }
+                }))
+              }
+            }
+          } catch {}
+        }
+      }
+    }
+  }
+
+  async function saveBatch() {
+    const valid = batchRows.filter(r => r.date && r.fund_name && (r.value || r.units))
+    if (!valid.length) return
+    setSavingBatch(true)
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
+    const rows = valid.map(r => ({
+      policy_id: policyId, date: r.date, fund_name: r.fund_name, type: r.type,
+      price: r.price ? parseFloat(r.price) : null,
+      units: r.units ? parseFloat(r.units) : null,
+      value: r.value ? parseFloat(r.value) : null,
+    }))
+    const res = await fetch('/api/admin', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'insert_transactions', payload: { rows }, access_token: token })
+    })
+    const result = await res.json()
+    if (result.ok !== false) {
+      await loadData()
+      setBatchRows(Array(5).fill(null).map(EMPTY_ROW))
+      setShowBatch(false)
+    }
+    setSavingBatch(false)
+  }
+
   function openAddTx(type) {
     setNewTx({ date: '', type: type || 'Reinvest', fund_name: '', price: '', units: '', value: '' })
     setShowAddTx(true)
@@ -1092,10 +1160,28 @@ export default function PolicyPage() {
           </div>
           <div className="text-xs text-gray-400 mb-4">Distributions received from underlying funds</div>
 
-          {showAddDiv && (
+          {showAddDiv && (() => {
+            // Auto-calc units held BEFORE ex-date for this fund
+            const divUnits = (() => {
+              if (!newDiv.fund_name || !newDiv.date) return null
+              let u = 0
+              transactions
+                .filter(t => t.fund_name === newDiv.fund_name && t.date < newDiv.date && t.type !== 'Dividend')
+                .sort((a, b) => new Date(a.date) - new Date(b.date))
+                .forEach(t => {
+                  const amt = Math.abs(parseFloat(t.units) || 0)
+                  if (['Switch Out','Welcome Bonus Clawback'].includes(t.type)) u -= amt
+                  else u += amt
+                })
+              return Math.max(0, u)
+            })()
+            // Auto-calc amount when rate is set
+            const autoAmount = divUnits && newDiv.price ? (divUnits * parseFloat(newDiv.price)).toFixed(2) : null
+
+            return (
             <div className="mb-4 p-3 border border-gray-200 rounded" id="add-div-form">
               <div className="text-xs text-gray-400 uppercase tracking-wider mb-3">New Dividend Entry</div>
-              <div className="grid grid-cols-2 gap-3 mb-3">
+              <div className="grid grid-cols-3 gap-3 mb-3">
                 <div>
                   <div className="text-xs text-gray-400 mb-1">Fund</div>
                   <select value={newDiv.fund_name} onChange={e => setNewDiv(d => ({ ...d, fund_name: e.target.value }))} className="w-full text-sm" style={{ padding: '4px 8px' }}>
@@ -1104,7 +1190,7 @@ export default function PolicyPage() {
                   </select>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-400 mb-1">Date</div>
+                  <div className="text-xs text-gray-400 mb-1">Ex-Date</div>
                   <input type="date" value={newDiv.date} onChange={e => setNewDiv(d => ({ ...d, date: e.target.value }))} className="w-full text-sm" style={{ padding: '4px 8px' }} />
                 </div>
                 <div>
@@ -1114,18 +1200,35 @@ export default function PolicyPage() {
                     <option value="Cash Out">Cash Out</option>
                   </select>
                 </div>
+                {divUnits !== null && (
+                  <div className="col-span-3 px-2 py-1.5 rounded text-xs" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+                    <span className="text-gray-500">Units held before ex-date: </span>
+                    <strong className="text-green-700 font-mono">{divUnits.toFixed(6)}</strong>
+                    {autoAmount && <span className="ml-4 text-gray-500">→ Est. payout at this rate: <strong className="text-green-700 font-mono">SGD {autoAmount}</strong></span>}
+                  </div>
+                )}
                 <div>
-                  <div className="text-xs text-gray-400 mb-1">Amount (SGD)</div>
-                  <input type="number" step="0.01" placeholder="0.00" value={newDiv.value} onChange={e => setNewDiv(d => ({ ...d, value: e.target.value }))} className="w-full text-sm" style={{ padding: '4px 8px' }} />
+                  <div className="text-xs text-gray-400 mb-1">Div Rate per Unit</div>
+                  <input type="number" step="0.0001" placeholder="0.0000" value={newDiv.price}
+                    onChange={e => setNewDiv(d => ({ ...d, price: e.target.value }))}
+                    className="w-full text-sm" style={{ padding: '4px 8px' }} />
                 </div>
                 <div>
-                  <div className="text-xs text-gray-400 mb-1">Div Rate per Unit (opt)</div>
-                  <input type="number" step="0.0001" placeholder="0.0000" value={newDiv.price} onChange={e => setNewDiv(d => ({ ...d, price: e.target.value }))} className="w-full text-sm" style={{ padding: '4px 8px' }} />
+                  <div className="text-xs text-gray-400 mb-1">
+                    Amount (SGD)
+                    {autoAmount && !newDiv.value && <button className="ml-2 text-green-600 underline" style={{background:'none',border:'none',cursor:'pointer',padding:0,fontSize:'inherit'}}
+                      onClick={() => setNewDiv(d => ({ ...d, value: autoAmount }))}>use {autoAmount}</button>}
+                  </div>
+                  <input type="number" step="0.01" placeholder={autoAmount || '0.00'} value={newDiv.value}
+                    onChange={e => setNewDiv(d => ({ ...d, value: e.target.value }))}
+                    className="w-full text-sm" style={{ padding: '4px 8px' }} />
                 </div>
                 {newDiv.type === 'Reinvest' && (
                   <div>
                     <div className="text-xs text-gray-400 mb-1">Units Reinvested</div>
-                    <input type="number" step="0.000001" placeholder="0.000000" value={newDiv.units} onChange={e => setNewDiv(d => ({ ...d, units: e.target.value }))} className="w-full text-sm" style={{ padding: '4px 8px' }} />
+                    <input type="number" step="0.000001" placeholder="0.000000" value={newDiv.units}
+                      onChange={e => setNewDiv(d => ({ ...d, units: e.target.value }))}
+                      className="w-full text-sm" style={{ padding: '4px 8px' }} />
                   </div>
                 )}
               </div>
@@ -1134,7 +1237,8 @@ export default function PolicyPage() {
                 <button onClick={() => setShowAddDiv(false)} className="btn-secondary text-xs">Cancel</button>
               </div>
             </div>
-          )}
+            )
+          })()}
 
           {dividendTxs.length === 0 ? (
             <div className="text-sm text-gray-400 py-4">No dividend transactions recorded yet.</div>
@@ -1218,21 +1322,99 @@ export default function PolicyPage() {
                 style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: deleteModeTx ? '#e53e3e' : '#9ca3af' }}>
                 {deleteModeTx ? 'Done' : 'Delete'}
               </button>
+              <button onClick={() => { setShowBatch(v => !v); setShowAddTx(false) }}
+                className="text-xs underline"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: showBatch ? '#2d5016' : '#9ca3af' }}>
+                {showBatch ? 'Close batch' : 'Batch add'}
+              </button>
               <button onClick={() => showAddTx ? setShowAddTx(false) : openAddTx('Net Investment Premium')}
                 className="text-xs text-gray-400 hover:text-gray-700 underline"
                 style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                {showAddTx ? 'Cancel' : '+ Add transaction'}
+                {showAddTx ? 'Cancel' : '+ Add one'}
               </button>
             </div>
           </div>
           <div className="text-xs text-gray-400 mb-4">Per-fund transaction ledger</div>
+
+          {/* ── Batch entry spreadsheet ── */}
+          {showBatch && (
+            <div className="mb-6 border border-gray-200 rounded" style={{ overflowX: 'auto' }}>
+              <div className="px-3 pt-3 pb-1 text-xs text-gray-400 uppercase tracking-wider">
+                Batch add — fill rows, price auto-fetches from D−1 when date + fund are set
+              </div>
+              <table className="w-full text-xs" style={{ minWidth: 800 }}>
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    {['DATE','FUND','TYPE','PRICE (D−1)','VALUE (SGD)','UNITS (auto)',''].map(h => (
+                      <th key={h} className="py-1.5 px-2 text-left text-gray-400 font-normal tracking-wider">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {batchRows.map((row, i) => (
+                    <tr key={i} className="border-b border-gray-50">
+                      <td className="px-2 py-1">
+                        <input type="date" value={row.date}
+                          onChange={e => updateBatchRow(i, 'date', e.target.value)}
+                          style={{ fontSize: 11, padding: '2px 4px', width: 120 }} />
+                      </td>
+                      <td className="px-2 py-1">
+                        <select value={row.fund_name}
+                          onChange={e => updateBatchRow(i, 'fund_name', e.target.value)}
+                          style={{ fontSize: 11, padding: '2px 4px', width: 200 }}>
+                          <option value="">Select…</option>
+                          {GE_FUNDS.map(f => <option key={f} value={f}>{f.replace('GreatLink ','')}</option>)}
+                        </select>
+                      </td>
+                      <td className="px-2 py-1">
+                        <select value={row.type}
+                          onChange={e => updateBatchRow(i, 'type', e.target.value)}
+                          style={{ fontSize: 11, padding: '2px 4px', width: 150 }}>
+                          {['Net Investment Premium','Reinvest','Switch In','Switch Out','Welcome Bonus'].map(t => (
+                            <option key={t} value={t}>{t}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-2 py-1">
+                        <input type="number" step="0.0001" placeholder="auto"
+                          value={row.price} onChange={e => updateBatchRow(i, 'price', e.target.value)}
+                          style={{ fontSize: 11, padding: '2px 4px', width: 80, fontFamily: 'monospace',
+                            background: row.price ? '#f0fdf4' : undefined }} />
+                      </td>
+                      <td className="px-2 py-1">
+                        <input type="number" step="0.01" placeholder="0.00"
+                          value={row.value} onChange={e => updateBatchRow(i, 'value', e.target.value)}
+                          style={{ fontSize: 11, padding: '2px 4px', width: 90, fontFamily: 'monospace' }} />
+                      </td>
+                      <td className="px-2 py-1 font-mono text-gray-500" style={{ fontSize: 11 }}>
+                        {row.units || '—'}
+                      </td>
+                      <td className="px-2 py-1 text-center">
+                        <button onClick={() => setBatchRows(r => r.filter((_,j) => j !== i))}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', fontSize: 14 }}>×</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="flex items-center gap-3 px-3 py-2">
+                <button onClick={() => setBatchRows(r => [...r, EMPTY_ROW()])}
+                  className="text-xs text-gray-400 hover:text-gray-700 underline"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>+ Add row</button>
+                <span className="text-gray-200">|</span>
+                <button onClick={saveBatch} disabled={savingBatch}
+                  className="btn-primary text-xs">{savingBatch ? 'Saving…' : `Save ${batchRows.filter(r => r.date && r.fund_name).length} entries`}</button>
+                <button onClick={() => setShowBatch(false)} className="btn-secondary text-xs">Cancel</button>
+              </div>
+            </div>
+          )}
 
           {showAddTx && (
             <div id="add-tx-form">
               <SmartTxForm
                 policyId={policyId}
                 transactions={transactions}
-                onSaved={() => { setShowAddTx(false); fetchData() }}
+                onSaved={() => { setShowAddTx(false); loadData() }}
                 onCancel={() => setShowAddTx(false)}
               />
             </div>
