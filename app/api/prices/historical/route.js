@@ -1,13 +1,15 @@
 import { NextResponse } from 'next/server'
 
-// Add N business days to a YYYY-MM-DD date string
+// Add N business days to a YYYY-MM-DD date string (negative = subtract)
 function addBusinessDays(dateStr, days) {
+  if (days === 0) return dateStr
   const d = new Date(dateStr + 'T00:00:00')
-  let added = 0
-  while (added < days) {
-    d.setDate(d.getDate() + 1)
+  const step = days > 0 ? 1 : -1
+  let moved = 0
+  while (moved < Math.abs(days)) {
+    d.setDate(d.getDate() + step)
     const dow = d.getDay()
-    if (dow !== 0 && dow !== 6) added++
+    if (dow !== 0 && dow !== 6) moved++
   }
   return d.toISOString().split('T')[0]
 }
@@ -29,7 +31,7 @@ export async function GET(request) {
     return NextResponse.json({ error: 'fundcode and date required' }, { status: 400 })
   }
 
-  const effectiveDate = offset > 0 ? addBusinessDays(date, offset) : date
+  const effectiveDate = offset !== 0 ? addBusinessDays(date, offset) : date
   const geDate = toGEFormat(effectiveDate)
 
   const url =

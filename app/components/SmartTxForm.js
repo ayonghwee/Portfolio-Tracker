@@ -89,10 +89,13 @@ export default function SmartTxForm({ policyId, transactions = [], onSaved, onCa
   const loadPriceSwitch = useCallback(async () => {
     if (!date || !toFund || !fromFund) return
     setFetchingPrice(true)
-    const offset = timeOfDay === 'after' ? 1 : 0
+    // GE convention: transaction date D uses price from D−1 (prev business day)
+    // Before 12pm → processes on D → price = D−1 (offset -1)
+    // After 12pm  → processes on D+1 → price = D (offset 0, i.e. the entered date)
+    const priceOffset = timeOfDay === 'after' ? 0 : -1
     const [fromData, toData] = await Promise.all([
-      fetchPrice(fromFund, date, offset),
-      fetchPrice(toFund,   date, offset),
+      fetchPrice(fromFund, date, priceOffset),
+      fetchPrice(toFund,   date, priceOffset),
     ])
     setFromPriceData(fromData)
     setPriceData(toData)
@@ -114,7 +117,8 @@ export default function SmartTxForm({ policyId, transactions = [], onSaved, onCa
   const loadPricePremium = useCallback(async () => {
     if (!date || !fund) return
     setFetchingPrice(true)
-    const data = await fetchPrice(fund, date, 0)
+    // GE convention: transaction date D uses price from D−1
+    const data = await fetchPrice(fund, date, -1)
     setPriceData(data)
     setFetchingPrice(false)
   }, [date, fund])
@@ -147,12 +151,15 @@ export default function SmartTxForm({ policyId, transactions = [], onSaved, onCa
   const premiumPrice  = priceData?.bidPrice
   const premiumUnits  = premiumPrice && amount ? parseFloat(amount) / premiumPrice : null
 
+  // Previous business day helper (for label display)
+  function prevBizDay(d) { return addBusinessDays(d, -1) }
+
   // effective date label
   const effectiveDateLabel = (() => {
     if (!date) return null
     if (mode === 'switch') {
-      if (timeOfDay === 'after') return `Price: ${addBusinessDays(date, 1)} (next biz day)`
-      return `Price: ${date} (same day)`
+      if (timeOfDay === 'after') return `Tx date: ${addBusinessDays(date, 1)} · Price: ${date} (prev day)`
+      return `Tx date: ${date} · Price: ${prevBizDay(date)} (prev day)`
     }
     if (mode === 'reinvest') {
       return `Ex-div: ${date} | Reinvest: ${date ? addBusinessDays(date, 1) : '—'}`
@@ -178,7 +185,9 @@ export default function SmartTxForm({ policyId, transactions = [], onSaved, onCa
         const pairId = crypto.randomUUID()
         const fromUnits = parseFloat(amount) / fromSwitchPrice
         const toUnits   = parseFloat(amount) / toSwitchPrice
-        const effectiveDate = timeOfDay === 'after' ? addBusinessDays(date, 1) : date
+        // After 12pm → GE processes next business day → transaction date = D+1
+        // Before 12pm → processes same day → transaction date = D
+        const txDate = timeOfDay === 'after' ? addBusinessDays(date, 1) : date
 
         // Compute running balances
         const fromBal = balanceUnitsFor(fromFund, transactions)
@@ -186,18 +195,16 @@ export default function SmartTxForm({ policyId, transactions = [], onSaved, onCa
 
         const rows = [
           {
-            policy_id: policyId, date, type: 'Switch Out',
+            policy_id: policyId, date: txDate, type: 'Switch Out',
             fund_name: fromFund, price: fromSwitchPrice, units: -fromUnits,
             value: -parseFloat(amount), bal_units: Math.max(0, fromBal - fromUnits),
-            price_effective_date: effectiveDate, time_of_day: timeOfDay,
-            pair_id: pairId,
+            time_of_day: timeOfDay, pair_id: pairId,
           },
           {
-            policy_id: policyId, date, type: 'Switch In',
+            policy_id: policyId, date: txDate, type: 'Switch In',
             fund_name: toFund, price: toSwitchPrice, units: toUnits,
             value: parseFloat(amount), bal_units: toBal + toUnits,
-            price_effective_date: effectiveDate, time_of_day: timeOfDay,
-            pair_id: pairId,
+            time_of_day: timeOfDay, pair_id: pairId,
           },
         ]
         const { error: e } = await supabase.from('transactions').insert(rows)
