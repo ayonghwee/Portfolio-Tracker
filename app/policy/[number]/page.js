@@ -124,7 +124,7 @@ function DonutChart({ data, size = 220, sw = 40 }) {
 
 // ─── PerformanceChart (Section IV) ──────────────────────────────────────────
 
-function PerformanceChart({ commenced, invested, aum, transactions }) {
+function PerformanceChart({ commenced, invested, aum, transactions, snapshots }) {
   const [showBenchmark, setShowBenchmark] = React.useState(false)
   const [tooltip, setTooltip] = React.useState(null)
   if (!commenced || !aum) return null
@@ -140,10 +140,29 @@ function PerformanceChart({ commenced, invested, aum, transactions }) {
   // TIA: flat line at invested amount (matches Meow behaviour)
   const tiaPoints = months.map(() => invested || 0)
 
-  const totalMs = Math.max(now - start, 1)
+  // TIV: if historical snapshots provided, interpolate through them; else linear to current AUM
+  const sortedSnaps = snapshots && snapshots.length > 0
+    ? [...snapshots].sort((a, b) => new Date(a.date) - new Date(b.date))
+    : []
+
+  // Anchor points: [start=invested, ...snapshots, now=aum]
+  const anchors = [
+    { ms: start.getTime(), v: invested || 0 },
+    ...sortedSnaps.map(s => ({ ms: new Date(s.date).getTime(), v: parseFloat(s.aum) })),
+    { ms: now.getTime(), v: aum },
+  ]
+
   const tivPoints = months.map(m => {
-    const ratio = Math.min((m - start) / totalMs, 1)
-    return (invested || 0) + (aum - (invested || 0)) * ratio
+    const ms = m.getTime()
+    // Find surrounding anchors
+    let lo = anchors[0], hi = anchors[anchors.length - 1]
+    for (let i = 0; i < anchors.length - 1; i++) {
+      if (ms >= anchors[i].ms && ms <= anchors[i+1].ms) { lo = anchors[i]; hi = anchors[i+1]; break }
+    }
+    if (ms <= lo.ms) return lo.v
+    if (ms >= hi.ms) return hi.v
+    const ratio = (ms - lo.ms) / Math.max(hi.ms - lo.ms, 1)
+    return lo.v + (hi.v - lo.v) * ratio
   })
 
   const allV  = [...tiaPoints, ...tivPoints]
@@ -349,10 +368,14 @@ export default function PolicyPage() {
   const [deleting, setDeleting]       = useState(false)
   const [priceStatus, setPriceStatus] = useState('')
   const [showAddTx, setShowAddTx]     = useState(false)
+  const [showAddDiv, setShowAddDiv]   = useState(false)
+  const [newDiv, setNewDiv]           = useState({ date: '', fund_name: '', type: 'Reinvest', price: '', units: '', value: '' })
+  const [savingDiv, setSavingDiv]     = useState(false)
   const [deleteModeDiv, setDeleteModeDiv] = useState(false)
   const [deleteModeTx, setDeleteModeTx]   = useState(false)
   const [editingPerf, setEditingPerf]     = useState(false)
   const [editPerf, setEditPerf]           = useState({ commenced: '', invested: '' })
+  const [perfData, setPerfData]           = useState([]) // historical {date,aum} snapshots
   const [newTx, setNewTx]             = useState({ date: '', type: 'Reinvest', fund_name: '', price: '', units: '', value: '' })
   const [savingTx, setSavingTx]       = useState(false)
   const [timelineYear, setTimelineYear] = useState(new Date().getFullYear())
@@ -391,6 +414,8 @@ export default function PolicyPage() {
     setPriceDate(pd)
     setEditHoldings(h || [])
     setEditPolicy(p)
+    setEditPerf({ commenced: p.commenced || '', invested: p.invested || '' })
+    try { setPerfData(JSON.parse(p.perf_data || '[]')) } catch { setPerfData([]) }
     setLoading(false)
     autoFetchPrices()
   }
@@ -471,8 +496,28 @@ export default function PolicyPage() {
     await supabase.from('policies').update({
       commenced: editPerf.commenced,
       invested: parseFloat(editPerf.invested) || 0,
+      perf_data: JSON.stringify(perfData),
     }).eq('id', policyId)
     await loadData(); setEditingPerf(false); setSaving(false)
+  }
+
+  async function saveDiv() {
+    if (!newDiv.fund_name || !newDiv.date) return
+    setSavingDiv(true)
+    const isReinvest = newDiv.type === 'Reinvest'
+    await supabase.from('transactions').insert([{
+      policy_id: policyId,
+      date: newDiv.date,
+      fund_name: newDiv.fund_name,
+      type: isReinvest ? 'Reinvest' : 'Dividend',
+      price: newDiv.price ? parseFloat(newDiv.price) : null,
+      units: isReinvest && newDiv.units ? parseFloat(newDiv.units) : null,
+      value: newDiv.value ? parseFloat(newDiv.value) : null,
+    }])
+    await loadData()
+    setShowAddDiv(false)
+    setNewDiv({ date: '', fund_name: '', type: 'Reinvest', price: '', units: '', value: '' })
+    setSavingDiv(false)
   }
 
   // Auto-derive fund_holdings units from transaction ledger.
@@ -768,18 +813,67 @@ export default function PolicyPage() {
             </button>
           </div>
           {editingPerf && (
-            <div className="flex items-end gap-4 mb-4 p-3 border border-gray-200 rounded">
-              <div>
-                <div className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Commenced</div>
-                <input type="date" value={editPerf.commenced}
-                  onChange={e => setEditPerf(p => ({ ...p, commenced: e.target.value }))}
-                  className="text-sm" style={{ padding: '4px 8px' }} />
+            <div className="mb-4 p-3 border border-gray-200 rounded">
+              {/* Basic fields */}
+              <div className="flex items-end gap-4 mb-4">
+                <div>
+                  <div className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Commenced</div>
+                  <input type="date" value={editPerf.commenced}
+                    onChange={e => setEditPerf(p => ({ ...p, commenced: e.target.value }))}
+                    className="text-sm" style={{ padding: '4px 8px' }} />
+                </div>
+                <div>
+                  <div className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Total Invested (SGD)</div>
+                  <input type="number" step="0.01" placeholder="0.00" value={editPerf.invested}
+                    onChange={e => setEditPerf(p => ({ ...p, invested: e.target.value }))}
+                    className="text-sm" style={{ padding: '4px 8px', width: 140 }} />
+                </div>
               </div>
-              <div>
-                <div className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Total Invested (SGD)</div>
-                <input type="number" step="0.01" placeholder="0.00" value={editPerf.invested}
-                  onChange={e => setEditPerf(p => ({ ...p, invested: e.target.value }))}
-                  className="text-sm" style={{ padding: '4px 8px', width: 140 }} />
+              {/* Historical AUM snapshots */}
+              <div className="mb-3">
+                <div className="text-xs text-gray-400 uppercase tracking-wider mb-2">Historical AUM Snapshots <span className="normal-case">(adds real data points to graph)</span></div>
+                {perfData.length > 0 && (
+                  <table className="w-full text-xs mb-2">
+                    <thead>
+                      <tr className="border-b border-gray-100">
+                        <th className="py-1 text-left text-gray-400 font-normal">DATE</th>
+                        <th className="py-1 text-right text-gray-400 font-normal">AUM (SGD)</th>
+                        <th className="py-1 w-8"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...perfData].sort((a,b) => new Date(a.date)-new Date(b.date)).map((s, i) => (
+                        <tr key={i} className="border-b border-gray-50">
+                          <td className="py-1 font-mono">{s.date}</td>
+                          <td className="py-1 text-right font-mono">{parseFloat(s.aum).toLocaleString('en-SG', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+                          <td className="py-1 text-center">
+                            <button onClick={() => setPerfData(d => d.filter((_,j) => j !== i))}
+                              className="text-red-400 hover:text-red-600" style={{background:'none',border:'none',cursor:'pointer'}}>✕</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                <div className="flex items-end gap-2">
+                  <div>
+                    <div className="text-xs text-gray-400 mb-1">Date</div>
+                    <input type="date" id="snap-date" className="text-xs" style={{padding:'3px 6px'}} />
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-400 mb-1">AUM (SGD)</div>
+                    <input type="number" step="0.01" placeholder="0.00" id="snap-aum" className="text-xs" style={{padding:'3px 6px', width:120}} />
+                  </div>
+                  <button className="btn-secondary text-xs" style={{padding:'4px 10px'}}
+                    onClick={() => {
+                      const d = document.getElementById('snap-date').value
+                      const v = document.getElementById('snap-aum').value
+                      if (!d || !v) return
+                      setPerfData(prev => [...prev, { date: d, aum: parseFloat(v) }])
+                      document.getElementById('snap-date').value = ''
+                      document.getElementById('snap-aum').value = ''
+                    }}>+ Add</button>
+                </div>
               </div>
               <div className="flex gap-2">
                 <button onClick={savePerfDetails} disabled={saving} className="btn-primary text-xs">{saving ? 'Saving…' : 'Save'}</button>
@@ -793,6 +887,7 @@ export default function PolicyPage() {
             invested={policy.invested}
             aum={aum}
             transactions={transactions}
+            snapshots={perfData}
           />
         </div>
 
@@ -988,12 +1083,59 @@ export default function PolicyPage() {
                 style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: deleteModeDiv ? '#e53e3e' : '#9ca3af' }}>
                 {deleteModeDiv ? 'Done' : 'Delete'}
               </button>
-              <button onClick={() => { setShowAddTx(true); setTimeout(() => document.getElementById('add-tx-form')?.scrollIntoView({behavior:'smooth'}), 50) }}
+              <button onClick={() => { setShowAddDiv(v => !v); setNewDiv({ date: '', fund_name: '', type: 'Reinvest', price: '', units: '', value: '' }) }}
                 className="text-xs text-gray-400 hover:text-gray-700 underline"
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>+ Add dividend</button>
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                {showAddDiv ? 'Cancel' : '+ Add dividend'}
+              </button>
             </div>
           </div>
           <div className="text-xs text-gray-400 mb-4">Distributions received from underlying funds</div>
+
+          {showAddDiv && (
+            <div className="mb-4 p-3 border border-gray-200 rounded" id="add-div-form">
+              <div className="text-xs text-gray-400 uppercase tracking-wider mb-3">New Dividend Entry</div>
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                  <div className="text-xs text-gray-400 mb-1">Fund</div>
+                  <select value={newDiv.fund_name} onChange={e => setNewDiv(d => ({ ...d, fund_name: e.target.value }))} className="w-full text-sm" style={{ padding: '4px 8px' }}>
+                    <option value="">Select fund…</option>
+                    {GE_FUNDS.map(f => <option key={f} value={f}>{f.replace('GreatLink ','')}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-400 mb-1">Date</div>
+                  <input type="date" value={newDiv.date} onChange={e => setNewDiv(d => ({ ...d, date: e.target.value }))} className="w-full text-sm" style={{ padding: '4px 8px' }} />
+                </div>
+                <div>
+                  <div className="text-xs text-gray-400 mb-1">Method</div>
+                  <select value={newDiv.type} onChange={e => setNewDiv(d => ({ ...d, type: e.target.value }))} className="w-full text-sm" style={{ padding: '4px 8px' }}>
+                    <option value="Reinvest">Reinvest</option>
+                    <option value="Cash Out">Cash Out</option>
+                  </select>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-400 mb-1">Amount (SGD)</div>
+                  <input type="number" step="0.01" placeholder="0.00" value={newDiv.value} onChange={e => setNewDiv(d => ({ ...d, value: e.target.value }))} className="w-full text-sm" style={{ padding: '4px 8px' }} />
+                </div>
+                <div>
+                  <div className="text-xs text-gray-400 mb-1">Div Rate per Unit (opt)</div>
+                  <input type="number" step="0.0001" placeholder="0.0000" value={newDiv.price} onChange={e => setNewDiv(d => ({ ...d, price: e.target.value }))} className="w-full text-sm" style={{ padding: '4px 8px' }} />
+                </div>
+                {newDiv.type === 'Reinvest' && (
+                  <div>
+                    <div className="text-xs text-gray-400 mb-1">Units Reinvested</div>
+                    <input type="number" step="0.000001" placeholder="0.000000" value={newDiv.units} onChange={e => setNewDiv(d => ({ ...d, units: e.target.value }))} className="w-full text-sm" style={{ padding: '4px 8px' }} />
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={saveDiv} disabled={savingDiv || !newDiv.fund_name || !newDiv.date} className="btn-primary text-xs">{savingDiv ? 'Saving…' : 'Save'}</button>
+                <button onClick={() => setShowAddDiv(false)} className="btn-secondary text-xs">Cancel</button>
+              </div>
+            </div>
+          )}
+
           {dividendTxs.length === 0 ? (
             <div className="text-sm text-gray-400 py-4">No dividend transactions recorded yet.</div>
           ) : (
