@@ -302,6 +302,8 @@ export default function PolicyPage() {
   const [newDiv, setNewDiv]           = useState({ date: '', fund_name: '', type: 'Reinvest', price: '', units: '', value: '' })
   const [savingDiv, setSavingDiv]     = useState(false)
   const [deleteModeDiv, setDeleteModeDiv] = useState(false)
+  const [deleteModeTx, setDeleteModeTx]   = useState(false)
+  const [showHistory, setShowHistory]     = useState(false)
   const [editingPerf, setEditingPerf]     = useState(false)
   const [editPerf, setEditPerf]           = useState({ commenced: '', invested: '' })
   const [perfData, setPerfData]           = useState([]) // historical {date,aum} snapshots
@@ -645,6 +647,12 @@ export default function PolicyPage() {
     .filter(t => ['Reinvest','Dividend'].includes(t.type) && t.value)
     .sort((a, b) => new Date(b.date) - new Date(a.date))
   const cashDividendTotal = dividendTxs.filter(t => t.type === 'Dividend').reduce((s, t) => s + Math.abs(parseFloat(t.value) || 0), 0)
+
+  // per-fund grouped transactions with running balance (used by history section)
+  const fundTimeline = computeBalanceUnits(transactions)
+  const txFunds    = holdings.map(h => h.fund_name).filter(f => fundTimeline[f])
+  const extraFunds = Object.keys(fundTimeline).filter(f => !txFunds.includes(f))
+  const allTxFunds = [...txFunds, ...extraFunds]
 
   return (
     <div className="min-h-screen" style={{ background: '#fafaf8' }}>
@@ -1229,6 +1237,106 @@ export default function PolicyPage() {
                 </tr>
               </tfoot>
             </table>
+          )}
+        </div>
+
+        {/* ── VIII. Transaction History (collapsible) ── */}
+        <div className="mt-10">
+          <div className="flex items-center justify-between mb-1">
+            <button
+              onClick={() => setShowHistory(v => !v)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div className="section-header" style={{ margin: 0 }}>
+                <span className="roman-sm">VIII.</span>
+                <span className="section-title">TRANSACTION HISTORY</span>
+              </div>
+              <span className="text-xs text-gray-400">{showHistory ? '▲ hide' : '▼ show'}</span>
+            </button>
+            {showHistory && (
+              <button onClick={() => setDeleteModeTx(v => !v)}
+                className="text-xs underline"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: deleteModeTx ? '#e53e3e' : '#9ca3af' }}>
+                {deleteModeTx ? 'Done' : 'Delete'}
+              </button>
+            )}
+          </div>
+
+          {showHistory && (
+            <div className="mt-3">
+              {allTxFunds.length === 0 ? (
+                <div className="text-sm text-gray-400 py-4">No transactions yet.</div>
+              ) : allTxFunds.map((fund, fi) => {
+                const fundTxs = fundTimeline[fund] || []
+                const price   = prices[fund]
+                const holding = holdings.find(h => h.fund_name === fund)
+                const currentUnits = fundTxs.length ? fundTxs[fundTxs.length - 1].bal_units : 0
+                const afterFeesValue = currentUnits * (price || holding?.last_known_price || 0)
+
+                return (
+                  <div key={fund} className={fi > 0 ? 'mt-8' : ''}>
+                    <div className="flex items-center justify-between py-2 border-b border-gray-300">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ background: FUND_COLORS[fi % FUND_COLORS.length] }} />
+                        <span className="font-medium text-sm">{fund.replace('GreatLink ', '')}</span>
+                      </div>
+                      <div className="text-xs text-gray-400">
+                        Current: <span className="font-mono text-gray-700">{fmtNum(currentUnits, 2)} units · ${fmtMoney(afterFeesValue)}</span>
+                      </div>
+                    </div>
+                    <table className="w-full text-sm mb-2" style={{ minWidth: 620 }}>
+                      <thead>
+                        <tr className="border-b border-gray-100">
+                          {['DATE','DESCRIPTION','PRICE','BAL UNITS','UNITS','VALUE', ...(deleteModeTx ? [''] : [])].map((h, i) => (
+                            <th key={i} className="py-1.5 pr-3 text-xs tracking-widest text-gray-400 font-normal"
+                              style={{ textAlign: i === 0 || i === 1 ? 'left' : 'right' }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...fundTxs].reverse().map(tx => {
+                          const isAutoFee = tx.auto_computed || tx.type === 'Policy Fee'
+                          return (
+                            <tr key={tx.id} className="table-row" style={isAutoFee ? { opacity: 0.6 } : {}}>
+                              <td className="py-2 pr-3 font-mono text-gray-400 text-xs">
+                                {tx.date ? new Date(tx.date).toLocaleDateString('en-SG', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'}
+                              </td>
+                              <td className="py-2 pr-3 text-xs">
+                                <span className={tx.type === 'Switch Out' || tx.type === 'Policy Fee' ? 'negative' : tx.type === 'Switch In' ? 'positive' : 'neutral'}>
+                                  {tx.type}{isAutoFee ? ' ·auto' : ''}
+                                </span>
+                              </td>
+                              <td className="py-2 pr-3 text-right font-mono text-xs">{tx.price ? fmtNum(tx.price, 3) : '—'}</td>
+                              <td className="py-2 pr-3 text-right font-mono text-xs">{tx.bal_units != null ? fmtNum(tx.bal_units, 2) : '—'}</td>
+                              <td className="py-2 pr-3 text-right font-mono text-xs">
+                                {tx.units_delta != null
+                                  ? <span className={tx.units_delta < 0 ? 'negative' : ''}>{tx.units_delta < 0 ? '-' : ''}{fmtNum(Math.abs(tx.units_delta), 2)}</span>
+                                  : '—'}
+                              </td>
+                              <td className="py-2 pr-3 text-right font-mono text-xs">
+                                {tx.value
+                                  ? <span className={['Switch Out','Policy Fee'].includes(tx.type) ? 'negative' : ''}>
+                                      {['Switch Out','Policy Fee'].includes(tx.type) ? '-' : ''}{fmtMoney(Math.abs(parseFloat(tx.value)))}
+                                    </span>
+                                  : '—'}
+                              </td>
+                              {deleteModeTx && (
+                                <td className="py-2 text-center">
+                                  {!isAutoFee && (
+                                    <button onClick={() => deleteTransaction(tx.id)}
+                                      className="text-red-400 hover:text-red-600 text-xs"
+                                      style={{ background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
+                                  )}
+                                </td>
+                              )}
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              })}
+            </div>
           )}
         </div>
 
