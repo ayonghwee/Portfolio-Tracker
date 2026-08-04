@@ -351,6 +351,8 @@ export default function PolicyPage() {
   const [showAddTx, setShowAddTx]     = useState(false)
   const [deleteModeDiv, setDeleteModeDiv] = useState(false)
   const [deleteModeTx, setDeleteModeTx]   = useState(false)
+  const [editingPerf, setEditingPerf]     = useState(false)
+  const [editPerf, setEditPerf]           = useState({ commenced: '', invested: '' })
   const [newTx, setNewTx]             = useState({ date: '', type: 'Reinvest', fund_name: '', price: '', units: '', value: '' })
   const [savingTx, setSavingTx]       = useState(false)
   const [timelineYear, setTimelineYear] = useState(new Date().getFullYear())
@@ -462,6 +464,15 @@ export default function PolicyPage() {
       welcome_bonus: parseFloat(editPolicy.welcome_bonus) || 0,
     }).eq('id', policyId)
     await loadData(); setEditingPolicy(false); setSaving(false)
+  }
+
+  async function savePerfDetails() {
+    setSaving(true)
+    await supabase.from('policies').update({
+      commenced: editPerf.commenced,
+      invested: parseFloat(editPerf.invested) || 0,
+    }).eq('id', policyId)
+    await loadData(); setEditingPerf(false); setSaving(false)
   }
 
   // Auto-derive fund_holdings units from transaction ledger.
@@ -750,10 +761,32 @@ export default function PolicyPage() {
         <div className="mb-10">
           <div className="flex items-center justify-between mb-2">
             <div className="section-header"><span className="roman-sm">IV.</span><span className="section-title">PERFORMANCE OVER TIME</span></div>
-            <button onClick={() => { setEditingPolicy(true); setEditPolicy(policy); document.getElementById('section-ii')?.scrollIntoView({ behavior: 'smooth' }) }}
-              className="text-xs text-gray-400 hover:text-gray-700 underline"
-              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Edit</button>
+            <button onClick={() => { setEditingPerf(v => !v); setEditPerf({ commenced: policy.commenced || '', invested: policy.invested || '' }) }}
+              className="text-xs underline"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: editingPerf ? '#e53e3e' : '#9ca3af' }}>
+              {editingPerf ? 'Cancel' : 'Edit'}
+            </button>
           </div>
+          {editingPerf && (
+            <div className="flex items-end gap-4 mb-4 p-3 border border-gray-200 rounded">
+              <div>
+                <div className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Commenced</div>
+                <input type="date" value={editPerf.commenced}
+                  onChange={e => setEditPerf(p => ({ ...p, commenced: e.target.value }))}
+                  className="text-sm" style={{ padding: '4px 8px' }} />
+              </div>
+              <div>
+                <div className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Total Invested (SGD)</div>
+                <input type="number" step="0.01" placeholder="0.00" value={editPerf.invested}
+                  onChange={e => setEditPerf(p => ({ ...p, invested: e.target.value }))}
+                  className="text-sm" style={{ padding: '4px 8px', width: 140 }} />
+              </div>
+              <div className="flex gap-2">
+                <button onClick={savePerfDetails} disabled={saving} className="btn-primary text-xs">{saving ? 'Saving…' : 'Save'}</button>
+                <button onClick={() => setEditingPerf(false)} className="btn-secondary text-xs">Cancel</button>
+              </div>
+            </div>
+          )}
           <div className="text-xs text-gray-400 mb-4">TIV vs TIA monthly trajectory</div>
           <PerformanceChart
             commenced={policy.commenced}
