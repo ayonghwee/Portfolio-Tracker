@@ -144,5 +144,19 @@ export async function POST(req) {
     return NextResponse.json({ holdings: updates })
   }
 
+  // payload.updates = [{ id, price }, ...]
+  if (action === 'update_transaction_prices') {
+    const key = access_token || ANON_KEY
+    const errors = []
+    for (const { id, price } of payload.updates) {
+      const r = await fetch(
+        `${SUPA_URL}/rest/v1/transactions?id=eq.${id}`,
+        { method: 'PATCH', headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }, body: JSON.stringify({ price }) }
+      )
+      if (!r.ok) errors.push(id)
+    }
+    return NextResponse.json({ ok: errors.length === 0, errors })
+  }
+
   return NextResponse.json({ error: 'unknown action' }, { status: 400 })
 }
