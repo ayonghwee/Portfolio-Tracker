@@ -4,7 +4,6 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '../../../lib/supabase'
 import { fmtMoney, calcROI, calcXIRR, calcDuration, fmtDate } from '../../../lib/utils'
-import SmartTxForm from '../../components/SmartTxForm'
 import { FUND_CODE_MAP } from '../../components/FundTypeahead'
 
 const FUND_COLORS = ['#2d5016','#b8963e','#c0724a','#4a7c59','#8b6914','#5a3e2b','#3d6b8c','#7a4f3e','#4e6b2d','#9b7b3d']
@@ -67,7 +66,7 @@ function computeBalanceUnits(transactions) {
     let bal = 0
     result[fund] = txs.filter(tx => tx.type !== 'Dividend').map(tx => {
       const u = Math.abs(parseFloat(tx.units) || 0)
-      const delta = ['Switch Out', 'Welcome Bonus Clawback'].includes(tx.type) ? -u : u
+      const delta = ['Switch Out', 'Welcome Bonus Clawback', 'Policy Fee'].includes(tx.type) ? -u : u
       bal = Math.max(0, bal + delta)
       return { ...tx, bal_units: bal, units_delta: delta }
     })
@@ -280,74 +279,6 @@ function PerformanceChart({ commenced, invested, aum, transactions, snapshots })
   )
 }
 
-// ─── ContributionTimeline (Section VI) ──────────────────────────────────────
-
-const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
-
-function ContributionTimeline({ transactions, year, holdings }) {
-  const funds = holdings.map(h => h.fund_name)
-  const allFundsWithTx = [...new Set(
-    transactions
-      .filter(t => ['Switch In','Switch Out','Net Investment Premium','Welcome Bonus'].includes(t.type) && t.fund_name)
-      .map(t => t.fund_name)
-  )]
-  const displayFunds = [...new Set([...funds, ...allFundsWithTx])]
-
-  const getCell = (fund, monthIdx) =>
-    transactions.filter(t =>
-      t.fund_name === fund &&
-      ['Switch In','Switch Out','Net Investment Premium','Welcome Bonus'].includes(t.type) &&
-      new Date(t.date).getFullYear() === year &&
-      new Date(t.date).getMonth() === monthIdx
-    )
-
-  if (!displayFunds.length) return <div className="text-sm text-gray-400 py-4">No contribution data yet.</div>
-
-  return (
-    <div style={{ overflowX: 'auto', border: '1px solid #e5e7eb', background: 'white' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 9 }}>
-        <thead>
-          <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
-            <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: 9, color: '#9ca3af', fontWeight: 400, letterSpacing: '0.08em', width: 130, background: '#fafaf8' }}>FUND</th>
-            {MONTHS.map(m => (
-              <th key={m} style={{ padding: '6px 4px', textAlign: 'center', fontSize: 9, color: '#9ca3af', fontWeight: 400, letterSpacing: '0.08em', minWidth: 62, background: '#fafaf8', borderLeft: '1px solid #e5e7eb' }}>{m}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {displayFunds.map(fund => (
-            <tr key={fund} style={{ borderBottom: '1px solid #f3f4f6' }}>
-              <td style={{ padding: '6px 10px', fontSize: 9, color: '#6b7280', verticalAlign: 'top', fontWeight: 500 }}>
-                {fund.replace('GreatLink ', '')}
-              </td>
-              {MONTHS.map((_, mi) => {
-                const txs = getCell(fund, mi)
-                return (
-                  <td key={mi} style={{ padding: '4px 3px', verticalAlign: 'top', fontSize: 8.5, lineHeight: 1.4, borderLeft: '1px solid #e5e7eb' }}>
-                    {txs.map((t, j) => {
-                      const d = new Date(t.date)
-                      const day = `${d.getDate().toString().padStart(2,'0')} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}`
-                      const amt = Math.abs(parseFloat(t.value) || 0)
-                      const isOut = t.type === 'Switch Out'
-                      const label = t.type === 'Net Investment Premium' ? 'Premium' : t.type === 'Welcome Bonus' ? 'Bonus' : null
-                      return (
-                        <div key={j} style={{ marginBottom: 2, color: isOut ? '#c0724a' : '#2d5016' }}>
-                          <div>{isOut ? '↑' : '↓'} {day} {fmtMoney(amt)}</div>
-                          {label && <div style={{ color: '#9ca3af', fontSize: 7.5 }}>— {label}</div>}
-                        </div>
-                      )
-                    })}
-                  </td>
-                )
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export default function PolicyPage() {
@@ -367,91 +298,126 @@ export default function PolicyPage() {
   const [saving, setSaving]           = useState(false)
   const [deleting, setDeleting]       = useState(false)
   const [priceStatus, setPriceStatus] = useState('')
-  const [showAddTx, setShowAddTx]     = useState(false)
   const [showAddDiv, setShowAddDiv]   = useState(false)
   const [newDiv, setNewDiv]           = useState({ date: '', fund_name: '', type: 'Reinvest', price: '', units: '', value: '' })
   const [savingDiv, setSavingDiv]     = useState(false)
   const [deleteModeDiv, setDeleteModeDiv] = useState(false)
-  const [deleteModeTx, setDeleteModeTx]   = useState(false)
   const [editingPerf, setEditingPerf]     = useState(false)
   const [editPerf, setEditPerf]           = useState({ commenced: '', invested: '' })
   const [perfData, setPerfData]           = useState([]) // historical {date,aum} snapshots
-  const [newTx, setNewTx]             = useState({ date: '', type: 'Reinvest', fund_name: '', price: '', units: '', value: '' })
-  const [savingTx, setSavingTx]       = useState(false)
-  const [timelineYear, setTimelineYear] = useState(new Date().getFullYear())
+  // ── Event modal (NIP / Switch / Welcome Bonus) ─────────────────────────────
+  const [showEventModal, setShowEventModal] = useState(false)
+  const [eventType, setEventType]     = useState('NIP')  // 'NIP' | 'Switch' | 'WB'
+  const [eventForm, setEventForm]     = useState({ date: '', fund: '', value: '', fromFund: '', toFund: '' })
+  const [eventPrices, setEventPrices] = useState({ fund: null, fromFund: null, toFund: null })
+  const [savingEvent, setSavingEvent] = useState(false)
+  const [computingFees, setComputingFees] = useState(false)
 
-  // ── Batch entry (Section VIII) ──────────────────────────────────────────────
-  const EMPTY_ROW = () => ({ date: '', fund_name: '', type: 'Net Investment Premium', price: '', units: '', value: '' })
-  const [showBatch, setShowBatch]     = useState(false)
-  const [batchRows, setBatchRows]     = useState(() => Array(5).fill(null).map(EMPTY_ROW))
-  const [savingBatch, setSavingBatch] = useState(false)
-
-  async function updateBatchRow(i, field, value) {
-    setBatchRows(rows => rows.map((r, idx) => {
-      if (idx !== i) return r
-      const u = { ...r, [field]: value }
-      if ((field === 'value' || field === 'price') && u.price && u.value) {
-        const p = parseFloat(u.price), v = parseFloat(u.value)
-        if (p && v) u.units = (v / p).toFixed(6)
+  async function fetchEventPrice(field, fund, date) {
+    if (!fund || !date) return
+    const code = FUND_CODE_MAP[fund]
+    if (!code) return
+    try {
+      const r = await fetch(`/api/prices/historical?fundcode=${encodeURIComponent(code)}&date=${date}&offset=-1`)
+      if (r.ok) {
+        const d = await r.json()
+        if (d.bidPrice) setEventPrices(p => ({ ...p, [field]: d.bidPrice }))
       }
-      return u
-    }))
-    // Auto-fetch D-1 price when date or fund changes
-    if (field === 'date' || field === 'fund_name') {
-      const current = batchRows[i]
-      const date2   = field === 'date'      ? value : current.date
-      const fund2   = field === 'fund_name' ? value : current.fund_name
-      if (date2 && fund2) {
-        const code = FUND_CODE_MAP[fund2]
-        if (code) {
-          try {
-            const res = await fetch(`/api/prices/historical?fundcode=${encodeURIComponent(code)}&date=${date2}&offset=-1`)
-            if (res.ok) {
-              const data = await res.json()
-              if (data.bidPrice) {
-                setBatchRows(rows => rows.map((r, idx) => {
-                  if (idx !== i) return r
-                  const price = String(data.bidPrice)
-                  const units = r.value ? (parseFloat(r.value) / data.bidPrice).toFixed(6) : r.units
-                  return { ...r, price, units: units || '' }
-                }))
-              }
-            }
-          } catch {}
-        }
-      }
-    }
+    } catch {}
   }
 
-  async function saveBatch() {
-    const valid = batchRows.filter(r => r.date && r.fund_name && (r.value || r.units))
-    if (!valid.length) return
-    setSavingBatch(true)
+  function updateEvent(key, val) {
+    setEventForm(f => ({ ...f, [key]: val }))
+    // Auto-fetch D-1 price on date/fund change
+    if (key === 'fund'     || key === 'date')     fetchEventPrice('fund',     key === 'fund' ? val : eventForm.fund,     key === 'date' ? val : eventForm.date)
+    if (key === 'fromFund' || key === 'date')     fetchEventPrice('fromFund', key === 'fromFund' ? val : eventForm.fromFund, key === 'date' ? val : eventForm.date)
+    if (key === 'toFund'   || key === 'date')     fetchEventPrice('toFund',   key === 'toFund' ? val : eventForm.toFund,   key === 'date' ? val : eventForm.date)
+  }
+
+  async function saveEvent() {
+    if (!eventForm.date) return
+    setSavingEvent(true)
     const { data: { session } } = await supabase.auth.getSession()
     const token = session?.access_token
-    const rows = valid.map(r => ({
-      policy_id: policyId, date: r.date, fund_name: r.fund_name, type: r.type,
-      price: r.price ? parseFloat(r.price) : null,
-      units: r.units ? parseFloat(r.units) : null,
-      value: r.value ? parseFloat(r.value) : null,
-    }))
+    const txs = []
+
+    if (eventType === 'Switch') {
+      if (!eventForm.fromFund || !eventForm.toFund || !eventForm.value) { setSavingEvent(false); return }
+      const val = parseFloat(eventForm.value)
+      // Fetch prices if not already loaded
+      let fp = eventPrices.fromFund, tp = eventPrices.toFund
+      if (!fp && eventForm.fromFund && FUND_CODE_MAP[eventForm.fromFund]) {
+        const r = await fetch(`/api/prices/historical?fundcode=${encodeURIComponent(FUND_CODE_MAP[eventForm.fromFund])}&date=${eventForm.date}&offset=-1`)
+        if (r.ok) { const d = await r.json(); fp = d.bidPrice }
+      }
+      if (!tp && eventForm.toFund && FUND_CODE_MAP[eventForm.toFund]) {
+        const r = await fetch(`/api/prices/historical?fundcode=${encodeURIComponent(FUND_CODE_MAP[eventForm.toFund])}&date=${eventForm.date}&offset=-1`)
+        if (r.ok) { const d = await r.json(); tp = d.bidPrice }
+      }
+      txs.push({
+        policy_id: policyId, date: eventForm.date, fund_name: eventForm.fromFund,
+        type: 'Switch Out', price: fp || null,
+        units: fp ? parseFloat((val / fp).toFixed(6)) : null, value: val,
+      })
+      txs.push({
+        policy_id: policyId, date: eventForm.date, fund_name: eventForm.toFund,
+        type: 'Switch In', price: tp || null,
+        units: tp ? parseFloat((val / tp).toFixed(6)) : null, value: val,
+      })
+    } else {
+      if (!eventForm.fund || !eventForm.value) { setSavingEvent(false); return }
+      const val = parseFloat(eventForm.value)
+      let p = eventPrices.fund
+      if (!p && FUND_CODE_MAP[eventForm.fund]) {
+        const r = await fetch(`/api/prices/historical?fundcode=${encodeURIComponent(FUND_CODE_MAP[eventForm.fund])}&date=${eventForm.date}&offset=-1`)
+        if (r.ok) { const d = await r.json(); p = d.bidPrice }
+      }
+      txs.push({
+        policy_id: policyId, date: eventForm.date, fund_name: eventForm.fund,
+        type: eventType === 'NIP' ? 'Net Investment Premium' : 'Welcome Bonus',
+        price: p || null, units: p ? parseFloat((val / p).toFixed(6)) : null, value: val,
+      })
+    }
+
     const res = await fetch('/api/admin', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'insert_transactions', payload: { rows }, access_token: token })
+      body: JSON.stringify({ action: 'insert_transactions', payload: { rows: txs }, access_token: token })
     })
     const result = await res.json()
     if (result.ok !== false) {
+      const { data: allTx } = await supabase.from('transactions').select('*').eq('policy_id', policyId).order('date', { ascending: true })
+      if (allTx) await syncHoldingsFromTransactions(allTx)
+      setShowEventModal(false)
+      setEventForm({ date: '', fund: '', value: '', fromFund: '', toFund: '' })
+      setEventPrices({ fund: null, fromFund: null, toFund: null })
       await loadData()
-      setBatchRows(Array(5).fill(null).map(EMPTY_ROW))
-      setShowBatch(false)
     }
-    setSavingBatch(false)
+    setSavingEvent(false)
   }
 
-  function openAddTx(type) {
-    setNewTx({ date: '', type: type || 'Reinvest', fund_name: '', price: '', units: '', value: '' })
-    setShowAddTx(true)
-    setTimeout(() => document.getElementById('add-tx-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+  async function computeFees(pid, commenced) {
+    if (!pid || !commenced) return
+    setComputingFees(true)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      const res = await fetch('/api/compute-fees', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ policy_id: pid, commenced, access_token: token })
+      })
+      const result = await res.json()
+      if (result.computed > 0) {
+        // New fees inserted — reload data then sync holdings
+        const { data: allTx } = await supabase.from('transactions').select('*').eq('policy_id', pid).order('date', { ascending: true })
+        if (allTx) {
+          setTransactions([...allTx].reverse())
+          await syncHoldingsFromTransactions(allTx)
+          const { data: h } = await supabase.from('fund_holdings').select('*').eq('policy_id', pid)
+          if (h) setHoldings(h)
+        }
+      }
+    } catch (e) { console.error('computeFees:', e) }
+    setComputingFees(false)
   }
 
   useEffect(() => { checkAuthAndLoad() }, [number])
@@ -459,13 +425,14 @@ export default function PolicyPage() {
   async function checkAuthAndLoad() {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) { router.push('/login'); return }
-    loadData()
+    const p = await loadData()
+    if (p?.id && p?.commenced) computeFees(p.id, p.commenced)
   }
 
   async function loadData() {
     setLoading(true)
     const { data: p } = await supabase.from('policies').select('*').eq('policy_number', number).single()
-    if (!p) { setLoading(false); return }
+    if (!p) { setLoading(false); return null }
     const [{ data: h }, { data: tx }, { data: pr }] = await Promise.all([
       supabase.from('fund_holdings').select('*').eq('policy_id', p.id),
       supabase.from('transactions').select('*').eq('policy_id', p.id).order('date', { ascending: false }),
@@ -486,6 +453,7 @@ export default function PolicyPage() {
     try { setPerfData(JSON.parse(p.perf_data || '[]')) } catch { setPerfData([]) }
     setLoading(false)
     autoFetchPrices()
+    return p
   }
 
   const GE_URL = 'https://www.greateasternlife.com/bin/corp-site/fund-prices.json?name=gDaily'
@@ -582,6 +550,8 @@ export default function PolicyPage() {
       units: isReinvest && newDiv.units ? parseFloat(newDiv.units) : null,
       value: newDiv.value ? parseFloat(newDiv.value) : null,
     }])
+    const { data: allTx } = await supabase.from('transactions').select('*').eq('policy_id', policyId).order('date', { ascending: true })
+    if (allTx) await syncHoldingsFromTransactions(allTx)
     await loadData()
     setShowAddDiv(false)
     setNewDiv({ date: '', fund_name: '', type: 'Reinvest', price: '', units: '', value: '' })
@@ -613,26 +583,6 @@ export default function PolicyPage() {
         }))
       )
     }
-  }
-
-  async function addTransaction() {
-    if (!newTx.date || !newTx.type) return
-    setSavingTx(true)
-    const units = parseFloat(newTx.units) || 0
-    const price = parseFloat(newTx.price) || 0
-    const value = parseFloat(newTx.value) || (units * price)
-    await supabase.from('transactions').insert({
-      policy_id: policyId, fund_name: newTx.fund_name || null,
-      date: newTx.date, type: newTx.type,
-      price: price || null, units: units || null, value: value || null,
-    })
-    // Re-fetch all transactions then sync holdings
-    const { data: allTx } = await supabase.from('transactions').select('*').eq('policy_id', policyId).order('date', { ascending: true })
-    if (allTx) await syncHoldingsFromTransactions(allTx)
-    setNewTx(t => ({ ...t, date: '', units: '', price: '', value: '' }))
-    setShowAddTx(false)
-    await loadData()
-    setSavingTx(false)
   }
 
   async function deleteTransaction(txId) {
@@ -694,16 +644,7 @@ export default function PolicyPage() {
   const dividendTxs = [...transactions]
     .filter(t => ['Reinvest','Dividend'].includes(t.type) && t.value)
     .sort((a, b) => new Date(b.date) - new Date(a.date))
-  const totalDividends = dividendTxs.reduce((s, t) => s + Math.abs(parseFloat(t.value) || 0), 0)
   const cashDividendTotal = dividendTxs.filter(t => t.type === 'Dividend').reduce((s, t) => s + Math.abs(parseFloat(t.value) || 0), 0)
-
-  // per-fund grouped transactions with BAL UNITS
-  const fundTimeline = computeBalanceUnits(transactions)
-
-  // unique funds with transactions, in holdings order first
-  const txFunds = holdings.map(h => h.fund_name).filter(f => fundTimeline[f])
-  const extraFunds = Object.keys(fundTimeline).filter(f => !txFunds.includes(f))
-  const allTxFunds = [...txFunds, ...extraFunds]
 
   return (
     <div className="min-h-screen" style={{ background: '#fafaf8' }}>
@@ -1120,27 +1061,6 @@ export default function PolicyPage() {
           )}
         </div>
 
-        {/* ── VI. Contribution timeline ── */}
-        <div className="mb-10">
-          <div className="flex items-center justify-between mb-1">
-            <div className="section-header"><span className="roman-sm">VI.</span><span className="section-title">CONTRIBUTION TIMELINE</span></div>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2 text-xs text-gray-400">
-                <button onClick={() => setTimelineYear(y => y - 1)}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af' }}>‹</button>
-                <span className="font-medium text-gray-700 text-sm">{timelineYear}</span>
-                <button onClick={() => setTimelineYear(y => y + 1)}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af' }}>›</button>
-              </div>
-              <button onClick={() => { setShowAddTx(true); setTimeout(() => document.getElementById('add-tx-form')?.scrollIntoView({behavior:'smooth'}), 50) }}
-                className="text-xs text-gray-400 hover:text-gray-700 underline"
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>+ Add switch</button>
-            </div>
-          </div>
-          <div className="text-xs text-gray-400 mb-4">Monthly premium allocations across funds</div>
-          <ContributionTimeline transactions={transactions} year={timelineYear} holdings={holdings} />
-        </div>
-
         {/* ── VII. Dividends ── */}
         <div className="mb-10">
           <div className="flex items-center justify-between mb-1">
@@ -1312,233 +1232,132 @@ export default function PolicyPage() {
           )}
         </div>
 
-        {/* ── VIII. Transactions ── */}
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <div className="section-header"><span className="roman-sm">VIII.</span><span className="section-title">TRANSACTIONS</span></div>
-            <div className="flex items-center gap-3">
-              <button onClick={() => setDeleteModeTx(v => !v)}
-                className="text-xs underline"
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: deleteModeTx ? '#e53e3e' : '#9ca3af' }}>
-                {deleteModeTx ? 'Done' : 'Delete'}
-              </button>
-              <button onClick={() => { setShowBatch(v => !v); setShowAddTx(false) }}
-                className="text-xs underline"
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: showBatch ? '#2d5016' : '#9ca3af' }}>
-                {showBatch ? 'Close batch' : 'Batch add'}
-              </button>
-              <button onClick={() => showAddTx ? setShowAddTx(false) : openAddTx('Net Investment Premium')}
-                className="text-xs text-gray-400 hover:text-gray-700 underline"
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                {showAddTx ? 'Cancel' : '+ Add one'}
-              </button>
+      </div>
+
+      {/* ── Floating "Record event" button ── */}
+      <button
+        onClick={() => { setShowEventModal(true); setEventType('NIP'); setEventForm({ date: '', fund: '', value: '', fromFund: '', toFund: '' }); setEventPrices({ fund: null, fromFund: null, toFund: null }) }}
+        style={{
+          position: 'fixed', bottom: 32, right: 32, zIndex: 40,
+          background: '#2d5016', color: 'white', border: 'none', borderRadius: 28,
+          padding: '12px 24px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+          boxShadow: '0 4px 16px rgba(45,80,22,0.35)', letterSpacing: '0.04em',
+        }}>
+        {computingFees ? '⟳ Computing fees…' : '+ Record event'}
+      </button>
+
+      {/* ── Event Modal ── */}
+      {showEventModal && (
+        <div
+          onClick={e => { if (e.target === e.currentTarget) setShowEventModal(false) }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: 10, padding: 28, width: 460, maxWidth: '92vw', boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}>
+            <div className="text-xs text-gray-400 uppercase tracking-widest mb-4">Record Event</div>
+
+            {/* Type selector */}
+            <div className="flex gap-2 mb-5">
+              {[
+                { key: 'NIP',    label: 'Net Investment' },
+                { key: 'Switch', label: 'Switch Funds'   },
+                { key: 'WB',     label: 'Welcome Bonus'  },
+              ].map(({ key, label }) => (
+                <button key={key} onClick={() => { setEventType(key); setEventPrices({ fund: null, fromFund: null, toFund: null }) }}
+                  style={{
+                    padding: '5px 14px', fontSize: 11, borderRadius: 20, cursor: 'pointer', fontWeight: 500,
+                    background: eventType === key ? '#2d5016' : '#f3f4f6',
+                    color: eventType === key ? 'white' : '#6b7280',
+                    border: 'none',
+                  }}>{label}</button>
+              ))}
+            </div>
+
+            {/* Date + Amount (common to all types) */}
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div>
+                <div className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Date</div>
+                <input type="date" value={eventForm.date}
+                  onChange={e => updateEvent('date', e.target.value)}
+                  className="w-full text-sm" style={{ padding: '6px 8px' }} />
+              </div>
+              <div>
+                <div className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Amount (SGD)</div>
+                <input type="number" step="0.01" placeholder="0.00" value={eventForm.value}
+                  onChange={e => setEventForm(f => ({ ...f, value: e.target.value }))}
+                  className="w-full text-sm" style={{ padding: '6px 8px', fontFamily: 'monospace' }} />
+              </div>
+            </div>
+
+            {eventType === 'Switch' ? (
+              <>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <div className="text-xs text-gray-400 mb-1 uppercase tracking-wider">From Fund</div>
+                    <select value={eventForm.fromFund}
+                      onChange={e => updateEvent('fromFund', e.target.value)}
+                      className="w-full text-sm" style={{ padding: '6px 8px' }}>
+                      <option value="">Select…</option>
+                      {GE_FUNDS.map(f => <option key={f} value={f}>{f.replace('GreatLink ', '')}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-400 mb-1 uppercase tracking-wider">To Fund</div>
+                    <select value={eventForm.toFund}
+                      onChange={e => updateEvent('toFund', e.target.value)}
+                      className="w-full text-sm" style={{ padding: '6px 8px' }}>
+                      <option value="">Select…</option>
+                      {GE_FUNDS.map(f => <option key={f} value={f}>{f.replace('GreatLink ', '')}</option>)}
+                    </select>
+                  </div>
+                </div>
+                {/* Show computed units preview */}
+                {(eventPrices.fromFund || eventPrices.toFund) && eventForm.value && (
+                  <div className="mb-3 px-3 py-2 rounded text-xs" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+                    {eventPrices.fromFund && <div className="text-gray-600">Switch Out: <span className="font-mono text-red-600">{fmtNum(parseFloat(eventForm.value) / eventPrices.fromFund, 2)} units</span> @ {fmtNum(eventPrices.fromFund, 3)} (D−1)</div>}
+                    {eventPrices.toFund   && <div className="text-gray-600 mt-0.5">Switch In:  <span className="font-mono text-green-700">{fmtNum(parseFloat(eventForm.value) / eventPrices.toFund, 2)} units</span> @ {fmtNum(eventPrices.toFund, 3)} (D−1)</div>}
+                  </div>
+                )}
+                {/* "Switch all" shortcut */}
+                {eventForm.fromFund && eventPrices.fromFund && (() => {
+                  const holding = holdings.find(h => h.fund_name === eventForm.fromFund)
+                  if (!holding?.units) return null
+                  const allValue = (holding.units * eventPrices.fromFund).toFixed(2)
+                  return (
+                    <div className="mb-3 text-xs text-gray-400">
+                      Current balance: <span className="font-mono">{fmtNum(holding.units, 2)} units ≈ ${fmtMoney(parseFloat(allValue))}</span>
+                      {' '}<button onClick={() => setEventForm(f => ({ ...f, value: allValue }))}
+                        className="text-green-600 underline ml-1" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 'inherit' }}>Switch all</button>
+                    </div>
+                  )
+                })()}
+              </>
+            ) : (
+              <>
+                <div className="mb-3">
+                  <div className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Fund</div>
+                  <select value={eventForm.fund}
+                    onChange={e => updateEvent('fund', e.target.value)}
+                    className="w-full text-sm" style={{ padding: '6px 8px' }}>
+                    <option value="">Select fund…</option>
+                    {GE_FUNDS.map(f => <option key={f} value={f}>{f.replace('GreatLink ', '')}</option>)}
+                  </select>
+                </div>
+                {eventPrices.fund && eventForm.value && (
+                  <div className="mb-3 px-3 py-2 rounded text-xs" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+                    <span className="text-gray-600">D−1 price: <span className="font-mono">{fmtNum(eventPrices.fund, 3)}</span></span>
+                    <span className="ml-4 text-gray-600">Units: <span className="font-mono text-green-700">{fmtNum(parseFloat(eventForm.value) / eventPrices.fund, 2)}</span></span>
+                  </div>
+                )}
+              </>
+            )}
+
+            <div className="flex gap-2 mt-4">
+              <button onClick={saveEvent} disabled={savingEvent || !eventForm.date || !eventForm.value}
+                className="btn-primary text-xs">{savingEvent ? 'Saving…' : 'Save'}</button>
+              <button onClick={() => setShowEventModal(false)} className="btn-secondary text-xs">Cancel</button>
             </div>
           </div>
-          <div className="text-xs text-gray-400 mb-4">Per-fund transaction ledger</div>
-
-          {/* ── Batch entry spreadsheet ── */}
-          {showBatch && (
-            <div className="mb-6 border border-gray-200 rounded" style={{ overflowX: 'auto' }}>
-              <div className="px-3 pt-3 pb-1 text-xs text-gray-400 uppercase tracking-wider">
-                Batch add — fill rows, price auto-fetches from D−1 when date + fund are set
-              </div>
-              <table className="w-full text-xs" style={{ minWidth: 800 }}>
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    {['DATE','FUND','TYPE','PRICE (D−1)','VALUE (SGD)','UNITS (auto)',''].map(h => (
-                      <th key={h} className="py-1.5 px-2 text-left text-gray-400 font-normal tracking-wider">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {batchRows.map((row, i) => (
-                    <tr key={i} className="border-b border-gray-50">
-                      <td className="px-2 py-1">
-                        <input type="date" value={row.date}
-                          onChange={e => updateBatchRow(i, 'date', e.target.value)}
-                          style={{ fontSize: 11, padding: '2px 4px', width: 120 }} />
-                      </td>
-                      <td className="px-2 py-1">
-                        <select value={row.fund_name}
-                          onChange={e => updateBatchRow(i, 'fund_name', e.target.value)}
-                          style={{ fontSize: 11, padding: '2px 4px', width: 200 }}>
-                          <option value="">Select…</option>
-                          {GE_FUNDS.map(f => <option key={f} value={f}>{f.replace('GreatLink ','')}</option>)}
-                        </select>
-                      </td>
-                      <td className="px-2 py-1">
-                        <select value={row.type}
-                          onChange={e => updateBatchRow(i, 'type', e.target.value)}
-                          style={{ fontSize: 11, padding: '2px 4px', width: 150 }}>
-                          {['Net Investment Premium','Reinvest','Switch In','Switch Out','Welcome Bonus'].map(t => (
-                            <option key={t} value={t}>{t}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-2 py-1">
-                        <input type="number" step="0.0001" placeholder="auto"
-                          value={row.price} onChange={e => updateBatchRow(i, 'price', e.target.value)}
-                          style={{ fontSize: 11, padding: '2px 4px', width: 80, fontFamily: 'monospace',
-                            background: row.price ? '#f0fdf4' : undefined }} />
-                      </td>
-                      <td className="px-2 py-1">
-                        <input type="number" step="0.01" placeholder="0.00"
-                          value={row.value} onChange={e => updateBatchRow(i, 'value', e.target.value)}
-                          style={{ fontSize: 11, padding: '2px 4px', width: 90, fontFamily: 'monospace' }} />
-                      </td>
-                      <td className="px-2 py-1 font-mono text-gray-500" style={{ fontSize: 11 }}>
-                        {row.units || '—'}
-                      </td>
-                      <td className="px-2 py-1 text-center">
-                        <button onClick={() => setBatchRows(r => r.filter((_,j) => j !== i))}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', fontSize: 14 }}>×</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="flex items-center gap-3 px-3 py-2">
-                <button onClick={() => setBatchRows(r => [...r, EMPTY_ROW()])}
-                  className="text-xs text-gray-400 hover:text-gray-700 underline"
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>+ Add row</button>
-                <span className="text-gray-200">|</span>
-                <button onClick={saveBatch} disabled={savingBatch}
-                  className="btn-primary text-xs">{savingBatch ? 'Saving…' : `Save ${batchRows.filter(r => r.date && r.fund_name).length} entries`}</button>
-                <button onClick={() => setShowBatch(false)} className="btn-secondary text-xs">Cancel</button>
-              </div>
-            </div>
-          )}
-
-          {showAddTx && (
-            <div id="add-tx-form">
-              <SmartTxForm
-                policyId={policyId}
-                transactions={transactions}
-                onSaved={() => { setShowAddTx(false); loadData() }}
-                onCancel={() => setShowAddTx(false)}
-              />
-            </div>
-          )}
-
-          {transactions.length === 0 ? (
-            <div className="py-8 text-center text-gray-400 text-sm">
-              No transactions yet.{' '}
-              <button onClick={() => setShowAddTx(true)} className="underline text-gray-600"
-                style={{ background: 'none', border: 'none', cursor: 'pointer' }}>Add your first →</button>
-            </div>
-          ) : (
-            <div>
-              {allTxFunds.map((fund, fi) => {
-                const fundTxs = fundTimeline[fund] || []
-                const price      = prices[fund]
-                const holding    = holdings.find(h => h.fund_name === fund)
-                const avgFromTx  = calcAvgPriceFromTx(transactions, fund)
-                const avgPrice   = avgFromTx || holding?.avg_price
-                const ret        = avgPrice && price ? ((price - avgPrice) / avgPrice) * 100 : null
-                const currentUnits = fundTxs.length ? fundTxs[fundTxs.length - 1].bal_units : 0
-
-                // totals — Meow's "before fees" = NET signed sum of all transactions
-                const totalBeforeUnits = fundTxs.reduce((s, t) => s + (t.units_delta || 0), 0)  // units_delta already signed
-                const totalBeforeValue = fundTxs.reduce((s, t) => {
-                  const v = Math.abs(parseFloat(t.value) || 0)
-                  return s + (['Switch Out', 'Welcome Bonus Clawback'].includes(t.type) ? -v : v)
-                }, 0)
-                // "after fees" value = current units × current market price (matches Meow)
-                const afterFeesValue = currentUnits * (price || holding?.last_known_price || 0)
-
-                return (
-                  <div key={fund} className={fi > 0 ? 'mt-8' : ''}>
-                    {/* Fund header row */}
-                    <div className="flex items-center justify-between py-2 border-b border-gray-300">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2.5 h-2.5 rounded-full" style={{ background: FUND_COLORS[fi % FUND_COLORS.length] }} />
-                        <span className="font-medium text-sm">{fund.replace('GreatLink ', '')}</span>
-                      </div>
-                      <div className="flex items-center gap-6 text-xs text-gray-400">
-                        <span>AVG PRICE <span className="text-gray-700 font-mono ml-1">{avgPrice ? fmtNum(avgPrice, 3) : '—'}</span></span>
-                        <span>CURRENT PRICE <span className="text-gray-700 font-mono ml-1">{price ? fmtNum(price, 3) : '—'}</span></span>
-                        <span className={`ml-1 font-mono ${ret == null ? '' : ret >= 0 ? 'positive' : 'negative'}`}>
-                          {ret != null ? `${ret >= 0 ? '+' : ''}${ret.toFixed(2)}%` : 'N/A'}
-                        </span>
-                      </div>
-                    </div>
-
-                    <table className="w-full text-sm mb-2">
-                      <thead>
-                        <tr className="border-b border-gray-100">
-                          {[
-                            { label: 'DATE',        align: 'left'   },
-                            { label: 'DESCRIPTION', align: 'left'   },
-                            { label: 'PRICE',       align: 'right'  },
-                            { label: 'BAL UNITS',   align: 'right'  },
-                            { label: 'UNITS',       align: 'right'  },
-                            { label: 'VALUE',       align: 'right'  },
-                            ...(deleteModeTx ? [{ label: '', align: 'center' }] : []),
-                          ].map(({ label, align }, i) => (
-                            <th key={i} className="py-1.5 pr-3 text-xs tracking-widest text-gray-400 font-normal" style={{ textAlign: align }}>{label}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[...fundTxs].reverse().map(tx => (
-                          <tr key={tx.id} className="table-row">
-                            <td className="py-2 pr-3 font-mono text-gray-400">
-                              {tx.date ? new Date(tx.date).toLocaleDateString('en-SG', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'}
-                            </td>
-                            <td className="py-2 pr-3 text-xs">
-                              <span className={tx.type === 'Switch Out' ? 'negative' : tx.type === 'Switch In' ? 'positive' : 'neutral'}>{tx.type}</span>
-                            </td>
-                            <td className="py-2 pr-3 text-right font-mono text-xs">{tx.price ? fmtNum(tx.price, 3) : '—'}</td>
-                            <td className="py-2 pr-3 text-right font-mono text-xs">{tx.bal_units != null ? fmtNum(tx.bal_units, 2) : '—'}</td>
-                            <td className="py-2 pr-3 text-right font-mono text-xs">
-                              {tx.units_delta != null ? (
-                                tx.type === 'Switch Out'
-                                  ? <span className="negative">-{fmtNum(Math.abs(tx.units_delta), 2)}</span>
-                                  : fmtNum(Math.abs(tx.units_delta), 2)
-                              ) : '—'}
-                            </td>
-                            <td className="py-2 pr-3 text-right font-mono text-xs">
-                              {tx.value ? (
-                                tx.type === 'Switch Out'
-                                  ? <span className="negative">-{fmtMoney(Math.abs(parseFloat(tx.value)))}</span>
-                                  : fmtMoney(Math.abs(parseFloat(tx.value)))
-                              ) : '—'}
-                            </td>
-                            {deleteModeTx && (
-                            <td className="py-2">
-                              <button onClick={() => deleteTransaction(tx.id)}
-                                className="text-red-400 hover:text-red-600 text-xs"
-                                style={{ background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
-                            </td>
-                            )}
-                          </tr>
-                        ))}
-                      </tbody>
-                      <tfoot>
-                        <tr className="border-t border-gray-100">
-                          <td colSpan={3} className="py-1 text-xs text-gray-400 uppercase tracking-wider">Total (before fees)</td>
-                          <td />
-                          <td className="py-1 text-right font-mono text-xs">{fmtNum(totalBeforeUnits, 2)}</td>
-                          <td className="py-1 text-right font-mono text-xs">{fmtMoney(totalBeforeValue)}</td>
-                          <td />
-                        </tr>
-                        <tr>
-                          <td colSpan={3} className="py-1 text-xs text-gray-400 uppercase tracking-wider">Total (after fees)</td>
-                          <td />
-                          <td className="py-1 text-right font-mono text-xs">{fmtNum(currentUnits, 2)}</td>
-                          <td className="py-1 text-right font-mono text-xs">{fmtMoney(afterFeesValue)}</td>
-                          <td />
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
-                )
-              })}
-            </div>
-          )}
         </div>
-
-      </div>
+      )}
     </div>
   )
 }
